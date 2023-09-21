@@ -9,8 +9,15 @@ fn main() {
     for stream in listener.incoming() {
         match stream {
             Ok(mut stream) => {
-                println!("accepted new connection");
-                stream.write_all(b"+PONG\r\n").unwrap();
+                println!(
+                    "accepted new connection, addr {}",
+                    stream.peer_addr().unwrap()
+                );
+                loop {
+                    if let Err(_) = stream.write_all(b"+PONG\r\n") {
+                        break;
+                    }
+                }
             }
             Err(e) => {
                 println!("error: {}", e);
