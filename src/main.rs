@@ -1,3 +1,4 @@
+use std::io::{BufRead, BufReader, Read};
 use std::{io::Write, net::TcpListener};
 
 fn main() {
@@ -13,10 +14,10 @@ fn main() {
                     "accepted new connection, addr {}",
                     stream.peer_addr().unwrap()
                 );
-                loop {
-                    if let Err(_) = stream.write_all(b"+PONG\r\n") {
-                        break;
-                    }
+
+                let mut buf = [0; 512];
+                while let Ok(_) = stream.read(&mut buf) {
+                    stream.write_all("+PONG\r\n".as_bytes()).unwrap();
                 }
             }
             Err(e) => {
