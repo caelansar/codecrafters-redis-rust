@@ -4,7 +4,7 @@ const CRLF: &'static str = "\r\n";
 
 // Redis Serialization Protocol
 #[derive(Debug, PartialOrd, PartialEq)]
-enum RESP {
+pub enum RESP {
     // Simple strings are encoded as a plus (+) character, followed by a string.
     // The string mustn't contain a CR (\r) or LF (\n) character and is terminated by CRLF (i.e., \r\n).
     SimpleString(String),
@@ -22,6 +22,34 @@ impl FromStr for RESP {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let mut parser = Decoder::new(s);
         parser.parse().ok_or("parse failed")
+    }
+}
+
+impl From<RESP> for String {
+    fn from(value: RESP) -> Self {
+        value.encode()
+    }
+}
+
+impl RESP {
+    pub fn encode(&self) -> String {
+        let mut res = String::new();
+        match self {
+            Self::SimpleString(s) => {
+                res.push_str(&format!("+{}\r\n", s));
+            }
+            Self::BulkString(s) => {
+                res.push_str(&format!("${}\r\n{}\r\n", s.len(), s));
+            }
+            Self::Array(v) => {
+                res.push_str(&format!("*{}\r\n", v.len()));
+
+                v.iter().for_each(|r| {
+                    res.push_str(r.encode().as_str());
+                })
+            }
+        }
+        res
     }
 }
 
@@ -113,6 +141,9 @@ mod tests {
         let resp: RESP = cmd.parse().unwrap();
 
         assert_eq!(RESP::BulkString("hello".into()), resp);
+
+        let s: String = resp.into();
+        assert_eq!(cmd, s);
     }
 
     #[test]
@@ -128,5 +159,8 @@ mod tests {
             ]),
             resp
         );
+
+        let s: String = resp.into();
+        assert_eq!(cmd, s);
     }
 }

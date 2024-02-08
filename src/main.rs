@@ -1,5 +1,6 @@
 mod protocol;
 
+use crate::protocol::RESP;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
@@ -21,7 +22,23 @@ async fn main() {
                 tokio::spawn(async move {
                     let mut buf = [0; 512];
                     while let Ok(_) = stream.read(&mut buf).await {
-                        stream.write_all("+PONG\r\n".as_bytes()).await.unwrap();
+                        let s = String::from_utf8_lossy(&buf);
+
+                        let resp: RESP = s.parse().unwrap();
+                        println!("recv command: {:?}", resp);
+
+                        if let RESP::Array(arr) = resp {
+                            if let Some(RESP::BulkString(cmd)) = arr.get(0) {
+                                if cmd.to_lowercase() == "echo" {
+                                    let data = arr.get(1).unwrap();
+                                    stream.write_all(data.encode().as_bytes()).await.unwrap();
+                                } else {
+                                    stream.write_all("+PONG\r\n".as_bytes()).await.unwrap();
+                                }
+                            } else {
+                                unreachable!()
+                            }
+                        }
                     }
                 });
             }
