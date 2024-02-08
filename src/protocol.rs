@@ -14,6 +14,8 @@ pub enum RESP {
     // Clients send commands to the Redis server as RESP arrays. Similarly, some Redis commands that
     // return collections of elements use arrays as their replies. An example is the LRANGE command that returns elements of a list.
     Array(Vec<RESP>),
+    // The null data type represents non-existent values.
+    Null,
 }
 
 impl FromStr for RESP {
@@ -47,6 +49,9 @@ impl RESP {
                 v.iter().for_each(|r| {
                     res.push_str(r.encode().as_str());
                 })
+            }
+            Self::Null => {
+                res.push_str("_\r\n");
             }
         }
         res
