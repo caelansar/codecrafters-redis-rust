@@ -2,9 +2,16 @@ mod protocol;
 
 use crate::protocol::RESP;
 use std::collections::HashMap;
+use std::ops::Add;
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
+
+struct Entry {
+    val: String,
+    exp: Option<Instant>,
+}
 
 #[tokio::main]
 async fn main() {
@@ -13,7 +20,7 @@ async fn main() {
 
     let listener = TcpListener::bind("127.0.0.1:6379").await.unwrap();
 
-    let mut map = Arc::new(Mutex::new(HashMap::<String, String>::new()));
+    let map = Arc::new(Mutex::new(HashMap::<String, Entry>::new()));
 
     while let Ok((mut stream, addr)) = listener.accept().await {
         println!("accepted new connection, addr {}", addr);
@@ -29,7 +36,7 @@ async fn main() {
                 println!("recv command: {:?}", resp);
 
                 if let RESP::Array(arr) = resp {
-                    if let Some(RESP::BulkString(cmd)) = arr.get(0) {
+                    if let Some(RESP::BulkString(Some(cmd))) = arr.get(0) {
                         match cmd.to_lowercase().as_str() {
                             "echo" => {
                                 let data = arr.get(1).unwrap();
@@ -38,10 +45,16 @@ async fn main() {
                             "get" => {
                                 let key = arr.get(1).unwrap();
 
-                                if let RESP::BulkString(key) = key {
+                                if let RESP::BulkString(Some(key)) = key {
                                     let data = match map.lock().unwrap().get(key) {
-                                        Some(x) => RESP::BulkString(x.to_string()),
-                                        None => RESP::Null,
+                                        Some(e) => {
+                                            if e.exp.is_none() || e.exp.unwrap() > Instant::now() {
+                                                RESP::BulkString(Some(e.val.clone()))
+                                            } else {
+                                                RESP::BulkString(None)
+                                            }
+                                        }
+                                        None => RESP::BulkString(None),
                                     };
                                     stream.write_all(data.encode().as_bytes()).await.unwrap();
                                 }
@@ -50,11 +63,26 @@ async fn main() {
                                 let key = arr.get(1).unwrap();
                                 let val = arr.get(2).unwrap();
 
-                                if let RESP::BulkString(key) = key {
-                                    if let RESP::BulkString(val) = val {
-                                        map.lock()
-                                            .unwrap()
-                                            .insert(key.to_string(), val.to_string());
+                                let px = arr.get(3);
+
+                                if let RESP::BulkString(Some(key)) = key {
+                                    if let RESP::BulkString(Some(val)) = val {
+                                        let mut entry = Entry {
+                                            val: val.to_string(),
+                                            exp: None,
+                                        };
+                                        if px.is_some_and(|x| {
+                                            *x == RESP::BulkString(Some("px".to_string()))
+                                        }) {
+                                            let exp = arr.get(4).unwrap();
+                                            if let RESP::BulkString(Some(e)) = exp {
+                                                let exp: u64 = e.parse().unwrap();
+                                                entry.exp = Some(
+                                                    Instant::now().add(Duration::from_millis(exp)),
+                                                );
+                                            }
+                                        }
+                                        map.lock().unwrap().insert(key.to_string(), entry);
                                     }
                                 }
 

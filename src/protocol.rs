@@ -10,7 +10,7 @@ pub enum RESP {
     SimpleString(String),
     // A bulk string represents a single binary string. The string can be of any size,
     // but by default, Redis limits it to 512 MB (see the proto-max-bulk-len configuration directive).
-    BulkString(String),
+    BulkString(Option<String>),
     // Clients send commands to the Redis server as RESP arrays. Similarly, some Redis commands that
     // return collections of elements use arrays as their replies. An example is the LRANGE command that returns elements of a list.
     Array(Vec<RESP>),
@@ -41,7 +41,12 @@ impl RESP {
                 res.push_str(&format!("+{}\r\n", s));
             }
             Self::BulkString(s) => {
-                res.push_str(&format!("${}\r\n{}\r\n", s.len(), s));
+                if s.is_none() {
+                    res.push_str("$-1\r\n");
+                } else {
+                    let s = s.as_ref().unwrap();
+                    res.push_str(&format!("${}\r\n{}\r\n", s.len(), s));
+                }
             }
             Self::Array(v) => {
                 res.push_str(&format!("*{}\r\n", v.len()));
@@ -131,7 +136,7 @@ impl<'a> Decoder<'a> {
         self.pos += len;
         self.pos += 2;
 
-        Some(RESP::BulkString(s))
+        Some(RESP::BulkString(Some(s)))
     }
 }
 
@@ -145,7 +150,7 @@ mod tests {
 
         let resp: RESP = cmd.parse().unwrap();
 
-        assert_eq!(RESP::BulkString("hello".into()), resp);
+        assert_eq!(RESP::BulkString(Some("hello".into())), resp);
 
         let s: String = resp.into();
         assert_eq!(cmd, s);
@@ -159,8 +164,8 @@ mod tests {
 
         assert_eq!(
             RESP::Array(vec![
-                RESP::BulkString("ECHO".into()),
-                RESP::BulkString("hey".into())
+                RESP::BulkString(Some("ECHO".into())),
+                RESP::BulkString(Some("hey".into()))
             ]),
             resp
         );
