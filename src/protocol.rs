@@ -3,7 +3,7 @@ use std::str::FromStr;
 const CRLF: &'static str = "\r\n";
 
 // Redis Serialization Protocol
-#[derive(Debug, PartialOrd, PartialEq)]
+#[derive(Debug, PartialOrd, PartialEq, Clone)]
 pub enum RESP {
     // Simple strings are encoded as a plus (+) character, followed by a string.
     // The string mustn't contain a CR (\r) or LF (\n) character and is terminated by CRLF (i.e., \r\n).
