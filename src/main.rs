@@ -1,15 +1,19 @@
 mod protocol;
+mod rdb;
 mod store;
 
 use crate::protocol::RESP;
+use crate::rdb::parser::Parser;
 use crate::store::Entry;
 use std::collections::HashMap;
-use std::env;
 use std::net::SocketAddr;
 use std::ops::Add;
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use std::{env, io};
+use tokio::fs::File;
+use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 
 async fn handle_connection(
@@ -99,6 +103,37 @@ async fn handle_connection(
                                 }
                             }
                             _ => unreachable!(),
+                        }
+                    }
+
+                    "keys" => {
+                        if let (Some(dir), Some(dbfilename)) = (dir.as_ref(), db_filename.as_ref())
+                        {
+                            let file = File::open(&Path::new(dir).join(dbfilename)).await;
+
+                            match file {
+                                Err(ref e) if e.kind() == io::ErrorKind::NotFound => {
+                                    println!("{}/{} not found", dir, dbfilename);
+                                    RESP::Array(vec![])
+                                }
+                                Err(e) => panic!("failed to read rdb file: {}", &e),
+                                Ok(_) => {
+                                    let file = file.unwrap();
+                                    let reader = BufReader::new(file);
+
+                                    let mut parser = Parser::new(reader);
+                                    parser.parse().await.unwrap();
+
+                                    RESP::Array(
+                                        parser
+                                            .get_keys()
+                                            .map(|x| RESP::BulkString(Some(x.clone())))
+                                            .collect::<Vec<RESP>>(),
+                                    )
+                                }
+                            }
+                        } else {
+                            unreachable!()
                         }
                     }
 
