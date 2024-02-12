@@ -173,6 +173,7 @@ impl<R: AsyncRead + Unpin> Parser<R> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::protocol::RESP::BulkString;
     use std::path::Path;
     use tokio::fs::File;
     use tokio::io::BufReader;
@@ -189,17 +190,35 @@ mod tests {
 
         assert_eq!(
             vec![
-                "183358245".to_string(),
-                "125".to_string(),
-                "-29477".to_string(),
-                "-123".to_string(),
-                "43947".to_string(),
-                "-183358245".to_string()
+                (
+                    "183358245".to_string(),
+                    BulkString(Some("Positive 32 bit integer".into()))
+                ),
+                (
+                    "125".to_string(),
+                    BulkString(Some("Positive 8 bit integer".into()))
+                ),
+                (
+                    "-29477".to_string(),
+                    BulkString(Some("Negative 16 bit integer".into()))
+                ),
+                (
+                    "-123".to_string(),
+                    BulkString(Some("Negative 8 bit integer".into()))
+                ),
+                (
+                    "43947".to_string(),
+                    BulkString(Some("Positive 16 bit integer".into()))
+                ),
+                (
+                    "-183358245".to_string(),
+                    BulkString(Some("Negative 32 bit integer".into()))
+                ),
             ],
             parser
                 .get_kv_pairs()
-                .map(|x| x.0.clone())
-                .collect::<Vec<String>>()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect::<Vec<(String, RESP)>>()
         );
     }
 }
