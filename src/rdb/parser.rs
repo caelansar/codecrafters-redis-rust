@@ -5,6 +5,8 @@ use super::{
 };
 use crate::protocol::RESP;
 use std::mem;
+use std::ops::Add;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::io::{AsyncRead, AsyncReadExt};
 
 pub async fn verify_magic<R: AsyncRead + Unpin>(input: &mut R) -> anyhow::Result<()> {
@@ -98,8 +100,8 @@ pub async fn read_blob<R: AsyncRead + Unpin>(input: &mut R) -> anyhow::Result<Ve
 
 pub struct Parser<R: AsyncRead + Unpin> {
     input: R,
-    last_expired: Option<u64>,
-    kvs: Vec<(String, RESP)>,
+    last_expired: Option<SystemTime>,
+    kvs: Vec<(String, (RESP, Option<SystemTime>))>,
 }
 
 impl<R: AsyncRead + Unpin> Parser<R> {
@@ -111,7 +113,7 @@ impl<R: AsyncRead + Unpin> Parser<R> {
         }
     }
 
-    pub fn get_kv_pairs(&self) -> impl Iterator<Item = &(String, RESP)> {
+    pub fn get_kv_pairs(&self) -> impl Iterator<Item = &(String, (RESP, Option<SystemTime>))> {
         return self.kvs.iter();
     }
 
@@ -129,8 +131,14 @@ impl<R: AsyncRead + Unpin> Parser<R> {
                     last_database = read_length(&mut self.input).await.unwrap();
                     println!("database: {}", last_database);
                 }
-                op_code::EXPIRETIME_MS => todo!(),
-                op_code::EXPIRETIME => todo!(),
+                op_code::EXPIRETIME_MS => {
+                    let expiretime_ms = self.input.read_u64_le().await?;
+                    self.last_expired = Some(UNIX_EPOCH.add(Duration::from_millis(expiretime_ms)))
+                }
+                op_code::EXPIRETIME => {
+                    let expiretime = self.input.read_u32_le().await?;
+                    self.last_expired = Some(UNIX_EPOCH.add(Duration::from_secs(expiretime as u64)))
+                }
                 op_code::AUX => {
                     let auxkey = read_blob(&mut self.input).await?;
                     let auxval = read_blob(&mut self.input).await?;
@@ -156,7 +164,10 @@ impl<R: AsyncRead + Unpin> Parser<R> {
 
                             self.kvs.push((
                                 String::from_utf8(key).unwrap(),
-                                RESP::BulkString(String::from_utf8(v).ok()),
+                                (
+                                    RESP::BulkString(String::from_utf8(v).ok()),
+                                    self.last_expired,
+                                ),
                             ));
                         }
                         _ => unimplemented!(),
@@ -217,7 +228,7 @@ mod tests {
             ],
             parser
                 .get_kv_pairs()
-                .map(|(k, v)| (k.clone(), v.clone()))
+                .map(|(k, v)| (k.clone(), v.0.clone()))
                 .collect::<Vec<(String, RESP)>>()
         );
     }

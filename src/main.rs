@@ -9,12 +9,13 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::ops::Add;
 use std::path::Path;
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::sync::Arc;
+use std::time::{Duration, Instant, SystemTime};
 use std::{env, io};
 use tokio::fs::File;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::Mutex;
 
 async fn handle_connection(
     mut stream: TcpStream,
@@ -40,9 +41,9 @@ async fn handle_connection(
                         let key = arr.get(1).unwrap();
 
                         if let RESP::BulkString(Some(key)) = key {
-                            match db.lock().unwrap().get(key) {
+                            match db.lock().await.get(key) {
                                 Some(e) => {
-                                    if e.exp.is_none() || e.exp.unwrap() > Instant::now() {
+                                    if e.exp.is_none() || e.exp.unwrap() > SystemTime::now() {
                                         RESP::BulkString(Some(e.val.clone()))
                                     } else {
                                         RESP::BulkString(None)
@@ -73,10 +74,10 @@ async fn handle_connection(
                                     if let RESP::BulkString(Some(e)) = exp {
                                         let exp: u64 = e.parse().unwrap();
                                         entry.exp =
-                                            Some(Instant::now().add(Duration::from_millis(exp)));
+                                            Some(SystemTime::now().add(Duration::from_millis(exp)));
                                     }
                                 }
-                                db.lock().unwrap().insert(key.to_string(), entry);
+                                db.lock().await.insert(key.to_string(), entry);
                             }
                         }
 
@@ -109,7 +110,7 @@ async fn handle_connection(
                     "keys" => {
                         let arr = db
                             .lock()
-                            .unwrap()
+                            .await
                             .keys()
                             .map(|x| RESP::BulkString(Some(x.clone())))
                             .collect::<Vec<RESP>>();
@@ -147,16 +148,25 @@ async fn init_db(dir: &Option<String>, db_filename: &Option<String>) -> HashMap<
 
                 parser
                     .get_kv_pairs()
-                    .filter(|(k, v)| matches!(v, &RESP::BulkString(_)))
-                    .filter_map(|(k, v)| {
+                    .filter_map(|(k, (v, exp))| {
                         if let &RESP::BulkString(Some(ref x)) = v {
-                            Some((
-                                k.clone(),
-                                Entry {
-                                    val: x.clone(),
-                                    exp: None,
-                                },
-                            ))
+                            match exp {
+                                Some(exp) if *exp > SystemTime::now() => Some((
+                                    k.clone(),
+                                    Entry {
+                                        val: x.clone(),
+                                        exp: Some(*exp),
+                                    },
+                                )),
+                                Some(_) => None, // expired
+                                None => Some((
+                                    k.clone(),
+                                    Entry {
+                                        val: x.clone(),
+                                        exp: None,
+                                    },
+                                )),
+                            }
                         } else {
                             None
                         }
