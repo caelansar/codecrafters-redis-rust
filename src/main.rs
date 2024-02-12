@@ -1,10 +1,10 @@
 mod protocol;
 mod rdb;
-mod store;
+mod storage;
 
 use crate::protocol::RESP;
 use crate::rdb::parser::Parser;
-use crate::store::Entry;
+use crate::storage::Entry;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::ops::Add;
@@ -19,7 +19,7 @@ use tokio::net::{TcpListener, TcpStream};
 async fn handle_connection(
     mut stream: TcpStream,
     addr: SocketAddr,
-    map: Arc<Mutex<HashMap<String, Entry>>>,
+    db: Arc<Mutex<HashMap<String, Entry>>>,
     dir: Arc<Option<String>>,
     db_filename: Arc<Option<String>>,
 ) {
@@ -40,7 +40,7 @@ async fn handle_connection(
                         let key = arr.get(1).unwrap();
 
                         if let RESP::BulkString(Some(key)) = key {
-                            match map.lock().unwrap().get(key) {
+                            match db.lock().unwrap().get(key) {
                                 Some(e) => {
                                     if e.exp.is_none() || e.exp.unwrap() > Instant::now() {
                                         RESP::BulkString(Some(e.val.clone()))
@@ -76,7 +76,7 @@ async fn handle_connection(
                                             Some(Instant::now().add(Duration::from_millis(exp)));
                                     }
                                 }
-                                map.lock().unwrap().insert(key.to_string(), entry);
+                                db.lock().unwrap().insert(key.to_string(), entry);
                             }
                         }
 
@@ -107,34 +107,14 @@ async fn handle_connection(
                     }
 
                     "keys" => {
-                        if let (Some(dir), Some(dbfilename)) = (dir.as_ref(), db_filename.as_ref())
-                        {
-                            let file = File::open(&Path::new(dir).join(dbfilename)).await;
+                        let arr = db
+                            .lock()
+                            .unwrap()
+                            .keys()
+                            .map(|x| RESP::BulkString(Some(x.clone())))
+                            .collect::<Vec<RESP>>();
 
-                            match file {
-                                Err(ref e) if e.kind() == io::ErrorKind::NotFound => {
-                                    println!("{}/{} not found", dir, dbfilename);
-                                    RESP::Array(vec![])
-                                }
-                                Err(e) => panic!("failed to read rdb file: {}", &e),
-                                Ok(_) => {
-                                    let file = file.unwrap();
-                                    let reader = BufReader::new(file);
-
-                                    let mut parser = Parser::new(reader);
-                                    parser.parse().await.unwrap();
-
-                                    RESP::Array(
-                                        parser
-                                            .get_keys()
-                                            .map(|x| RESP::BulkString(Some(x.clone())))
-                                            .collect::<Vec<RESP>>(),
-                                    )
-                                }
-                            }
-                        } else {
-                            unreachable!()
-                        }
+                        RESP::Array(arr)
                     }
 
                     _ => RESP::SimpleString("PONG".into()),
@@ -148,14 +128,53 @@ async fn handle_connection(
     }
 }
 
+async fn init_db(dir: &Option<String>, db_filename: &Option<String>) -> HashMap<String, Entry> {
+    if let (Some(dir), Some(dbfilename)) = (dir, db_filename) {
+        let file = File::open(&Path::new(dir).join(dbfilename)).await;
+
+        match file {
+            Err(ref e) if e.kind() == io::ErrorKind::NotFound => {
+                println!("{}/{} not found", dir, dbfilename);
+                HashMap::new()
+            }
+            Err(e) => panic!("failed to read rdb file: {}", &e),
+            Ok(_) => {
+                let file = file.unwrap();
+                let reader = BufReader::new(file);
+
+                let mut parser = Parser::new(reader);
+                parser.parse().await.unwrap();
+
+                parser
+                    .get_kv_pairs()
+                    .filter(|(k, v)| matches!(v, &RESP::BulkString(_)))
+                    .filter_map(|(k, v)| {
+                        if let &RESP::BulkString(Some(ref x)) = v {
+                            Some((
+                                k.clone(),
+                                Entry {
+                                    val: x.clone(),
+                                    exp: None,
+                                },
+                            ))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect()
+            }
+        }
+    } else {
+        HashMap::new()
+    }
+}
+
 #[tokio::main]
 async fn main() {
     // You can use print statements as follows for debugging, they'll be visible when running tests.
     println!("Logs from your program will appear here!");
 
     let listener = TcpListener::bind("127.0.0.1:6379").await.unwrap();
-
-    let map = Arc::new(Mutex::new(HashMap::<String, Entry>::new()));
 
     let args = env::args().collect::<Vec<String>>();
 
@@ -171,14 +190,17 @@ async fn main() {
 
     println!("dir: {:?}, db_filename: {:?}", dir, db_filename);
 
+    let db = init_db(&dir, &db_filename).await;
+    let db = Arc::new(Mutex::new(db));
+
     let dir = Arc::new(dir);
     let db_filename = Arc::new(db_filename);
 
     while let Ok((stream, addr)) = listener.accept().await {
-        let map = map.clone();
+        let db = db.clone();
         let dir = dir.clone();
         let db_filename = db_filename.clone();
 
-        tokio::spawn(async move { handle_connection(stream, addr, map, dir, db_filename).await });
+        tokio::spawn(async move { handle_connection(stream, addr, db, dir, db_filename).await });
     }
 }

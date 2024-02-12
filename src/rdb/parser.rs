@@ -1,6 +1,9 @@
-use super::{int_to_vec, read_exact};
-use crate::rdb::consts::{self, op_code};
-use crate::rdb::encoding::Encoding;
+use super::{
+    consts::{self, op_code},
+    encoding::Encoding,
+    int_to_vec, read_exact,
+};
+use crate::protocol::RESP;
 use std::mem;
 use tokio::io::{AsyncRead, AsyncReadExt};
 
@@ -96,7 +99,7 @@ pub async fn read_blob<R: AsyncRead + Unpin>(input: &mut R) -> anyhow::Result<Ve
 pub struct Parser<R: AsyncRead + Unpin> {
     input: R,
     last_expired: Option<u64>,
-    keys: Vec<String>,
+    kvs: Vec<(String, RESP)>,
 }
 
 impl<R: AsyncRead + Unpin> Parser<R> {
@@ -104,12 +107,12 @@ impl<R: AsyncRead + Unpin> Parser<R> {
         Parser {
             input,
             last_expired: None,
-            keys: vec![],
+            kvs: vec![],
         }
     }
 
-    pub fn get_keys(&self) -> impl Iterator<Item = &String> {
-        return self.keys.iter();
+    pub fn get_kv_pairs(&self) -> impl Iterator<Item = &(String, RESP)> {
+        return self.kvs.iter();
     }
 
     pub async fn parse(&mut self) -> anyhow::Result<()> {
@@ -146,12 +149,15 @@ impl<R: AsyncRead + Unpin> Parser<R> {
                 _ => {
                     let key = read_blob(&mut self.input).await?;
 
-                    self.keys.push(String::from_utf8(key).unwrap());
-
                     match next_op {
                         0 => {
-                            // string
-                            let _ = read_blob(&mut self.input).await?;
+                            // string type
+                            let v = read_blob(&mut self.input).await?;
+
+                            self.kvs.push((
+                                String::from_utf8(key).unwrap(),
+                                RESP::BulkString(String::from_utf8(v).ok()),
+                            ));
                         }
                         _ => unimplemented!(),
                     }
@@ -191,8 +197,8 @@ mod tests {
                 "-183358245".to_string()
             ],
             parser
-                .get_keys()
-                .map(|x| x.clone())
+                .get_kv_pairs()
+                .map(|x| x.0.clone())
                 .collect::<Vec<String>>()
         );
     }
