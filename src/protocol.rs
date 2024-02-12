@@ -144,33 +144,32 @@ impl<'a> Decoder<'a> {
 mod tests {
     use super::*;
 
+    struct Testcase {
+        cmd: &'static str,
+        resp: RESP,
+    }
     #[test]
     fn test_parse_string() {
-        let cmd = "$5\r\nhello\r\n";
+        let testcases = vec![
+            Testcase {
+                cmd: "$5\r\nhello\r\n",
+                resp: RESP::BulkString(Some("hello".into())),
+            },
+            Testcase {
+                cmd: "*2\r\n$4\r\nECHO\r\n$3\r\nhey\r\n",
+                resp: RESP::Array(vec![
+                    RESP::BulkString(Some("ECHO".into())),
+                    RESP::BulkString(Some("hey".into())),
+                ]),
+            },
+        ];
 
-        let resp: RESP = cmd.parse().unwrap();
+        testcases.iter().for_each(|testcase| {
+            let resp: RESP = testcase.cmd.parse().unwrap();
+            assert_eq!(testcase.resp, resp);
 
-        assert_eq!(RESP::BulkString(Some("hello".into())), resp);
-
-        let s: String = resp.into();
-        assert_eq!(cmd, s);
-    }
-
-    #[test]
-    fn test_parse_array() {
-        let cmd = "*2\r\n$4\r\nECHO\r\n$3\r\nhey\r\n";
-
-        let resp: RESP = cmd.parse().unwrap();
-
-        assert_eq!(
-            RESP::Array(vec![
-                RESP::BulkString(Some("ECHO".into())),
-                RESP::BulkString(Some("hey".into()))
-            ]),
-            resp
-        );
-
-        let s: String = resp.into();
-        assert_eq!(cmd, s);
+            let s: String = resp.into();
+            assert_eq!(testcase.cmd, s);
+        })
     }
 }
