@@ -122,7 +122,7 @@ async fn handle_connection(
 
                     "info" => {
                         if is_master {
-                            RESP::BulkString(Some("role:master".into()))
+                            RESP::BulkString(Some("role:master\nmaster_replid:8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb\nmaster_repl_offset:0".into()))
                         } else {
                             RESP::BulkString(Some("role:slave".into()))
                         }
@@ -241,8 +241,8 @@ async fn main() {
         let dir = dir.clone();
         let db_filename = db_filename.clone();
 
-        tokio::spawn(
-            async move { handle_connection(stream, addr, db, dir, db_filename, is_master).await },
-        );
+        tokio::spawn(async move {
+            handle_connection(stream, addr, db, dir, db_filename, is_master).await
+        });
     }
 }
