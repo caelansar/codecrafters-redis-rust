@@ -64,16 +64,16 @@ impl RESP {
     }
 }
 
-pub struct Decoder<'a> {
+pub(crate) struct Decoder<'a> {
     input: &'a str,
     pos: usize,
 }
 
 impl<'a> Decoder<'a> {
-    pub fn new(input: &'a str) -> Decoder<'a> {
+    pub(crate) fn new(input: &'a str) -> Decoder<'a> {
         Decoder { input, pos: 0 }
     }
-    pub fn parse(&mut self) -> Option<RESP> {
+    pub(crate) fn parse(&mut self) -> Option<RESP> {
         if self.pos >= self.input.len() {
             return None;
         }

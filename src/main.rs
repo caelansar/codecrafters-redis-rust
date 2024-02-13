@@ -5,7 +5,6 @@ mod storage;
 use crate::protocol::{Decoder, RESP};
 use crate::rdb::parser::Parser;
 use crate::storage::Entry;
-use anyhow::anyhow;
 use std::collections::HashMap;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::ops::Add;
@@ -202,13 +201,18 @@ async fn handshake(
         stream.write_all(resp.encode().as_bytes()).await?;
 
         // The replica sends REPLCONF twice to the master
-        let resp = RESP::Array(vec![RESP::BulkString(Some(format!(
-            "REPLCONF listening-port {}",
-            listening_port
-        )))]);
+        let resp = RESP::Array(vec![
+            RESP::BulkString(Some("REPLCONF".into())),
+            RESP::BulkString(Some("listening-port".into())),
+            RESP::BulkString(Some(listening_port.to_string())),
+        ]);
         stream.write_all(resp.encode().as_bytes()).await?;
 
-        let resp = RESP::Array(vec![RESP::BulkString(Some("REPLCONF capa psync2".into()))]);
+        let resp = RESP::Array(vec![
+            RESP::BulkString(Some("REPLCONF".into())),
+            RESP::BulkString(Some("capa".into())),
+            RESP::BulkString(Some("psync2".into())),
+        ]);
         stream.write_all(resp.encode().as_bytes()).await?;
 
         let mut buf = [0; 512];
@@ -225,6 +229,21 @@ async fn handshake(
 
         let resp = parser.parse();
         assert_eq!(Some(RESP::SimpleString("OK".into())), resp);
+
+        let resp = RESP::Array(vec![
+            RESP::BulkString(Some("PSYNC".into())),
+            RESP::BulkString(Some("?".into())),
+            RESP::BulkString(Some("-1".into())),
+        ]);
+        stream.write_all(resp.encode().as_bytes()).await?;
+
+        let mut buf = [0; 64];
+        stream.read(&mut buf).await?;
+
+        let cmd = String::from_utf8_lossy(&buf);
+        let r: Option<RESP> = cmd.parse().ok();
+
+        assert!(matches!(r, Some(RESP::SimpleString(_))));
     }
 
     Ok(())
