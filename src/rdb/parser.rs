@@ -35,7 +35,7 @@ pub async fn verify_version<R: AsyncRead + Unpin>(input: &mut R) -> anyhow::Resu
         + (version[2] - 48) as u32 * 10
         + (version[3] - 48) as u32;
 
-    let is_supported = version >= consts::SUPPORTED_MINIMUM && version <= consts::SUPPORTED_MAXIMUM;
+    let is_supported = (consts::SUPPORTED_MINIMUM..=consts::SUPPORTED_MAXIMUM).contains(&version);
 
     if is_supported {
         Ok(())

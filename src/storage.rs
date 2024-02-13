@@ -1,4 +1,4 @@
-use std::time::{Instant, SystemTime};
+use std::time::SystemTime;
 
 pub(crate) struct Entry {
     pub(crate) val: String,

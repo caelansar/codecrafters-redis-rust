@@ -10,7 +10,7 @@ use std::net::SocketAddr;
 use std::ops::Add;
 use std::path::Path;
 use std::sync::Arc;
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, SystemTime};
 use std::{env, io};
 use tokio::fs::File;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader};
@@ -27,14 +27,14 @@ async fn handle_connection(
     println!("accepted new connection, addr {}", addr);
 
     let mut buf = [0; 512];
-    while let Ok(_) = stream.read(&mut buf).await {
+    while stream.read(&mut buf).await.is_ok() {
         let s = String::from_utf8_lossy(&buf);
 
         let resp: RESP = s.parse().unwrap();
         println!("recv command: {:?}", resp);
 
         if let RESP::Array(arr) = resp {
-            if let Some(RESP::BulkString(Some(cmd))) = arr.get(0) {
+            if let Some(RESP::BulkString(Some(cmd))) = arr.first() {
                 let resp = match cmd.to_lowercase().as_str() {
                     "echo" => arr.get(1).cloned().unwrap(),
                     "get" => {

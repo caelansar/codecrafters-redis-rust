@@ -1,6 +1,7 @@
 use std::str::FromStr;
 
-const CRLF: &'static str = "\r\n";
+const CR: &str = "\r";
+const LF: &str = "\n";
 
 // Redis Serialization Protocol
 #[derive(Debug, PartialOrd, PartialEq, Clone)]

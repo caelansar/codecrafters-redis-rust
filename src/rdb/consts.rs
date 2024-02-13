@@ -1,4 +1,4 @@
-pub const RDB_MAGIC: &'static str = "REDIS";
+pub const RDB_MAGIC: &str = "REDIS";
 
 pub const SUPPORTED_MINIMUM: u32 = 1;
 pub const SUPPORTED_MAXIMUM: u32 = 7;
