@@ -6,13 +6,14 @@ use crate::protocol::RESP;
 use crate::rdb::parser::Parser;
 use crate::storage::Entry;
 use std::collections::HashMap;
-use std::net::{Ipv4Addr, SocketAddr};
+use std::fmt::format;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr, ToSocketAddrs};
 use std::ops::Add;
 use std::path::Path;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
-use std::{env, io};
+use std::{env, io, vec};
 use tokio::fs::File;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
@@ -24,7 +25,7 @@ async fn handle_connection(
     db: Arc<Mutex<HashMap<String, Entry>>>,
     dir: Arc<Option<String>>,
     db_filename: Arc<Option<String>>,
-    is_master: bool,
+    replica_opt: Arc<Option<(Option<String>, Option<u16>)>>,
 ) {
     println!("accepted new connection, addr {}", addr);
 
@@ -121,7 +122,7 @@ async fn handle_connection(
                     }
 
                     "info" => {
-                        if is_master {
+                        if replica_opt.is_none() {
                             RESP::BulkString(Some("role:master\nmaster_replid:8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb\nmaster_repl_offset:0".into()))
                         } else {
                             RESP::BulkString(Some("role:slave".into()))
@@ -189,6 +190,17 @@ async fn init_db(dir: &Option<String>, db_filename: &Option<String>) -> HashMap<
     }
 }
 
+async fn handshake(replica_opt: Arc<Option<(Option<String>, Option<u16>)>>) -> anyhow::Result<()> {
+    if let Some((Some(host), Some(port))) = replica_opt.as_ref() {
+        let mut stream = TcpStream::connect(format!("{}:{}", host, port)).await?;
+
+        let resp = RESP::Array(vec![RESP::BulkString(Some("PING".into()))]);
+        stream.write_all(resp.encode().as_bytes()).await?;
+    }
+
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() {
     // You can use print statements as follows for debugging, they'll be visible when running tests.
@@ -218,12 +230,23 @@ async fn main() {
         .position(|arg| arg == "--dbfilename")
         .and_then(|index| args.get(index + 1).cloned());
 
-    let replic_opt = args
+    let replica_opt = args
         .iter()
         .position(|arg| arg == "--replicaof")
-        .map(|index| (args.get(index + 1).cloned(), args.get(index + 2).cloned()));
+        .map(|index| {
+            (
+                args.get(index + 1).cloned(),
+                args.get(index + 2).map(|x| x.parse::<u16>().unwrap()),
+            )
+        });
+    let replica_opt = Arc::new(replica_opt);
 
-    println!("dir: {:?}, db_filename: {:?}", dir, db_filename);
+    println!(
+        "dir: {:?}, db_filename: {:?}, replica_opt: {:?}",
+        dir,
+        db_filename,
+        replica_opt.as_ref()
+    );
 
     let db = init_db(&dir, &db_filename).await;
     let db = Arc::new(Mutex::new(db));
@@ -231,18 +254,16 @@ async fn main() {
     let dir = Arc::new(dir);
     let db_filename = Arc::new(db_filename);
 
-    let mut is_master = true;
-    if replic_opt.is_some() {
-        is_master = false
-    }
+    handshake(replica_opt.clone()).await.unwrap();
 
     while let Ok((stream, addr)) = listener.accept().await {
         let db = db.clone();
         let dir = dir.clone();
         let db_filename = db_filename.clone();
+        let replica_opt = replica_opt.clone();
 
         tokio::spawn(async move {
-            handle_connection(stream, addr, db, dir, db_filename, is_master).await
+            handle_connection(stream, addr, db, dir, db_filename, replica_opt).await
         });
     }
 }
