@@ -6,9 +6,10 @@ use crate::protocol::RESP;
 use crate::rdb::parser::Parser;
 use crate::storage::Entry;
 use std::collections::HashMap;
-use std::net::SocketAddr;
+use std::net::{Ipv4Addr, SocketAddr};
 use std::ops::Add;
 use std::path::Path;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 use std::{env, io};
@@ -184,9 +185,19 @@ async fn main() {
     // You can use print statements as follows for debugging, they'll be visible when running tests.
     println!("Logs from your program will appear here!");
 
-    let listener = TcpListener::bind("127.0.0.1:6379").await.unwrap();
-
     let args = env::args().collect::<Vec<String>>();
+
+    let port = args
+        .iter()
+        .position(|arg| arg == "--port")
+        .and_then(|index| args.get(index + 1).cloned());
+    let port: Option<u16> = port.and_then(|p| p.parse().ok());
+
+    let addr = SocketAddr::from((
+        Ipv4Addr::from_str("127.0.0.1").unwrap(),
+        port.unwrap_or(6379),
+    ));
+    let listener = TcpListener::bind(addr).await.unwrap();
 
     let dir = args
         .iter()
