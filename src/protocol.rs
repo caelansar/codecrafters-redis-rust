@@ -64,21 +64,22 @@ impl RESP {
     }
 }
 
-struct Decoder<'a> {
+pub struct Decoder<'a> {
     input: &'a str,
     pos: usize,
 }
 
 impl<'a> Decoder<'a> {
-    fn new(input: &'a str) -> Decoder<'a> {
+    pub fn new(input: &'a str) -> Decoder<'a> {
         Decoder { input, pos: 0 }
     }
-    fn parse(&mut self) -> Option<RESP> {
+    pub fn parse(&mut self) -> Option<RESP> {
         if self.pos >= self.input.len() {
             return None;
         }
 
         let cmd = &self.input[self.pos..];
+        println!("cmd: {}", cmd);
 
         match cmd.as_bytes()[0] {
             b'*' => {
@@ -88,6 +89,10 @@ impl<'a> Decoder<'a> {
             b'$' => {
                 self.pos += 1;
                 self.parse_bulk_string()
+            }
+            b'+' => {
+                self.pos += 1;
+                self.parse_simple_string()
             }
             _ => unreachable!(),
         }
@@ -116,6 +121,21 @@ impl<'a> Decoder<'a> {
 
         Some(RESP::Array(arr))
     }
+
+    fn parse_simple_string(&mut self) -> Option<RESP> {
+        if self.pos >= self.input.len() {
+            return None;
+        }
+
+        let cmd = &self.input[self.pos..];
+
+        let res = cmd.chars().take_while(|x| *x != '\r').collect::<String>();
+
+        self.pos += res.len() + 2;
+
+        Some(RESP::SimpleString(res))
+    }
+
     fn parse_bulk_string(&mut self) -> Option<RESP> {
         if self.pos >= self.input.len() {
             return None;
@@ -152,6 +172,10 @@ mod tests {
     #[test]
     fn test_parse_string() {
         let testcases = vec![
+            Testcase {
+                cmd: "+OK\r\n",
+                resp: RESP::SimpleString("OK".into()),
+            },
             Testcase {
                 cmd: "$5\r\nhello\r\n",
                 resp: RESP::BulkString(Some("hello".into())),

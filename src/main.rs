@@ -2,12 +2,12 @@ mod protocol;
 mod rdb;
 mod storage;
 
-use crate::protocol::RESP;
+use crate::protocol::{Decoder, RESP};
 use crate::rdb::parser::Parser;
 use crate::storage::Entry;
+use anyhow::anyhow;
 use std::collections::HashMap;
-use std::fmt::format;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr, ToSocketAddrs};
+use std::net::{Ipv4Addr, SocketAddr};
 use std::ops::Add;
 use std::path::Path;
 use std::str::FromStr;
@@ -141,12 +141,12 @@ async fn handle_connection(
 }
 
 async fn init_db(dir: &Option<String>, db_filename: &Option<String>) -> HashMap<String, Entry> {
-    if let (Some(dir), Some(dbfilename)) = (dir, db_filename) {
-        let file = File::open(&Path::new(dir).join(dbfilename)).await;
+    if let (Some(dir), Some(db_filename)) = (dir, db_filename) {
+        let file = File::open(&Path::new(dir).join(db_filename)).await;
 
         match file {
             Err(ref e) if e.kind() == io::ErrorKind::NotFound => {
-                println!("{}/{} not found", dir, dbfilename);
+                println!("{}/{} not found", dir, db_filename);
                 HashMap::new()
             }
             Err(e) => panic!("failed to read rdb file: {}", &e),
@@ -190,12 +190,41 @@ async fn init_db(dir: &Option<String>, db_filename: &Option<String>) -> HashMap<
     }
 }
 
-async fn handshake(replica_opt: Arc<Option<(Option<String>, Option<u16>)>>) -> anyhow::Result<()> {
+async fn handshake(
+    listening_port: u16,
+    replica_opt: Arc<Option<(Option<String>, Option<u16>)>>,
+) -> anyhow::Result<()> {
     if let Some((Some(host), Some(port))) = replica_opt.as_ref() {
         let mut stream = TcpStream::connect(format!("{}:{}", host, port)).await?;
 
+        // The replica sends a PING to the master
         let resp = RESP::Array(vec![RESP::BulkString(Some("PING".into()))]);
         stream.write_all(resp.encode().as_bytes()).await?;
+
+        // The replica sends REPLCONF twice to the master
+        let resp = RESP::Array(vec![RESP::BulkString(Some(format!(
+            "REPLCONF listening-port {}",
+            listening_port
+        )))]);
+        stream.write_all(resp.encode().as_bytes()).await?;
+
+        let resp = RESP::Array(vec![RESP::BulkString(Some("REPLCONF capa psync2".into()))]);
+        stream.write_all(resp.encode().as_bytes()).await?;
+
+        let mut buf = [0; 512];
+        stream.read(&mut buf).await?;
+
+        let s = String::from_utf8_lossy(&buf);
+        let mut parser = Decoder::new(s.as_ref());
+
+        let resp = parser.parse();
+        assert_eq!(Some(RESP::SimpleString("PONG".into())), resp);
+
+        let resp = parser.parse();
+        assert_eq!(Some(RESP::SimpleString("OK".into())), resp);
+
+        let resp = parser.parse();
+        assert_eq!(Some(RESP::SimpleString("OK".into())), resp);
     }
 
     Ok(())
@@ -212,12 +241,9 @@ async fn main() {
         .iter()
         .position(|arg| arg == "--port")
         .and_then(|index| args.get(index + 1).cloned());
-    let port: Option<u16> = port.and_then(|p| p.parse().ok());
+    let port: u16 = port.and_then(|p| p.parse().ok()).unwrap_or(6379);
 
-    let addr = SocketAddr::from((
-        Ipv4Addr::from_str("127.0.0.1").unwrap(),
-        port.unwrap_or(6379),
-    ));
+    let addr = SocketAddr::from((Ipv4Addr::from_str("127.0.0.1").unwrap(), port));
     let listener = TcpListener::bind(addr).await.unwrap();
 
     let dir = args
@@ -254,7 +280,7 @@ async fn main() {
     let dir = Arc::new(dir);
     let db_filename = Arc::new(db_filename);
 
-    handshake(replica_opt.clone()).await.unwrap();
+    handshake(port, replica_opt.clone()).await.unwrap();
 
     while let Ok((stream, addr)) = listener.accept().await {
         let db = db.clone();
