@@ -218,6 +218,11 @@ async fn main() {
         .position(|arg| arg == "--dbfilename")
         .and_then(|index| args.get(index + 1).cloned());
 
+    let replic_opt = args
+        .iter()
+        .position(|arg| arg == "--replicaof")
+        .map(|index| (args.get(index + 1).cloned(), args.get(index + 2).cloned()));
+
     println!("dir: {:?}, db_filename: {:?}", dir, db_filename);
 
     let db = init_db(&dir, &db_filename).await;
@@ -226,13 +231,18 @@ async fn main() {
     let dir = Arc::new(dir);
     let db_filename = Arc::new(db_filename);
 
+    let mut is_master = true;
+    if replic_opt.is_some() {
+        is_master = false
+    }
+
     while let Ok((stream, addr)) = listener.accept().await {
         let db = db.clone();
         let dir = dir.clone();
         let db_filename = db_filename.clone();
 
         tokio::spawn(
-            async move { handle_connection(stream, addr, db, dir, db_filename, true).await },
+            async move { handle_connection(stream, addr, db, dir, db_filename, is_master).await },
         );
     }
 }
