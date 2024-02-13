@@ -24,6 +24,7 @@ async fn handle_connection(
     db: Arc<Mutex<HashMap<String, Entry>>>,
     dir: Arc<Option<String>>,
     db_filename: Arc<Option<String>>,
+    is_master: bool,
 ) {
     println!("accepted new connection, addr {}", addr);
 
@@ -117,6 +118,14 @@ async fn handle_connection(
                             .collect::<Vec<RESP>>();
 
                         RESP::Array(arr)
+                    }
+
+                    "info" => {
+                        if is_master {
+                            RESP::BulkString(Some("role:master".into()))
+                        } else {
+                            RESP::BulkString(Some("role:slave".into()))
+                        }
                     }
 
                     _ => RESP::SimpleString("PONG".into()),
@@ -222,6 +231,8 @@ async fn main() {
         let dir = dir.clone();
         let db_filename = db_filename.clone();
 
-        tokio::spawn(async move { handle_connection(stream, addr, db, dir, db_filename).await });
+        tokio::spawn(
+            async move { handle_connection(stream, addr, db, dir, db_filename, true).await },
+        );
     }
 }
