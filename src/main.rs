@@ -18,6 +18,7 @@ use std::time::{Duration, SystemTime};
 use std::{env, io, vec};
 use tokio::fs::File;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader};
+use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc::Sender;
 use tokio::sync::{mpsc, Mutex};
@@ -30,33 +31,27 @@ fn decode_hex(s: &str) -> Result<Vec<u8>, ParseIntError> {
 }
 
 async fn handle_connection(
-    stream: TcpStream,
+    streams: (OwnedReadHalf, OwnedWriteHalf),
     addr: SocketAddr,
     db: Arc<Mutex<HashMap<String, Entry>>>,
     dir: Arc<Option<String>>,
     db_filename: Arc<Option<String>>,
     replica_opt: Arc<Option<(Option<String>, Option<u16>)>>,
-    replicas: Arc<Mutex<Vec<Arc<Mutex<TcpStream>>>>>,
+    replicas: Arc<Mutex<Vec<Arc<Mutex<OwnedWriteHalf>>>>>,
     tx: Sender<RESP>,
 ) {
     println!("accepted new connection, addr {}", addr);
 
-    let stream = Arc::new(Mutex::new(stream));
+    let mut stream = streams.0;
 
-    let replicas_clone = Arc::clone(&replicas);
+    let writer = Arc::new(Mutex::new(streams.1));
 
     let mut buf = [0; 512];
-    while stream
-        .lock()
-        .await
-        .read(&mut buf)
-        .await
-        .is_ok_and(|n| n > 0)
-    {
+    while stream.read(&mut buf).await.is_ok_and(|n| n > 0) {
         let s = String::from_utf8_lossy(&buf);
 
         let resp: RESP = s.parse().unwrap();
-        println!("recv command: {:?}", resp);
+        println!("command str: {}, recv command: {:?}", s, resp);
 
         if let RESP::Array(arr) = resp {
             if let Some(RESP::BulkString(Some(cmd))) = arr.first() {
@@ -181,7 +176,7 @@ async fn handle_connection(
                     _ => unimplemented!(),
                 };
 
-                stream
+                writer
                     .lock()
                     .await
                     .write_all(resp.encode().as_bytes())
@@ -193,9 +188,9 @@ async fn handle_connection(
                     let binary_rdb = decode_hex(consts::EMPTY_RDB).unwrap();
                     let mut data = format!("${}\r\n", binary_rdb.len()).into_bytes();
                     data.extend(binary_rdb);
-                    stream.lock().await.write_all(&data).await.unwrap();
+                    writer.lock().await.write_all(&data).await.unwrap();
 
-                    replicas_clone.lock().await.push(stream.clone());
+                    replicas.lock().await.push(writer.clone());
                     println!("push replicas")
                 }
             } else {
@@ -369,7 +364,7 @@ async fn main() {
 
     handshake(port, replica_opt.clone()).await.unwrap();
 
-    let replicas: Arc<Mutex<Vec<Arc<Mutex<TcpStream>>>>> = Arc::new(Mutex::new(vec![]));
+    let replicas: Arc<Mutex<Vec<Arc<Mutex<OwnedWriteHalf>>>>> = Arc::new(Mutex::new(vec![]));
     let replicas_clone = Arc::clone(&replicas);
 
     let (tx, mut rx) = mpsc::channel::<RESP>(10);
@@ -401,6 +396,8 @@ async fn main() {
         let replica_opt = replica_opt.clone();
         let replicas_clone = Arc::clone(&replicas_clone);
         let tx = tx.clone();
+
+        let stream = stream.into_split();
 
         tokio::spawn(async move {
             handle_connection(
