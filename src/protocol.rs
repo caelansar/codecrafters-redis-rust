@@ -93,7 +93,10 @@ impl<'a> Decoder<'a> {
                 self.pos += 1;
                 self.parse_simple_string()
             }
-            _ => unreachable!(),
+            _ => {
+                println!("cmd: {}", cmd);
+                unreachable!()
+            }
         }
     }
     fn parse_array(&mut self) -> Option<RESP> {

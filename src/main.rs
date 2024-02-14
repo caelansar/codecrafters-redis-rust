@@ -6,6 +6,7 @@ use crate::protocol::{Decoder, RESP};
 use crate::rdb::consts;
 use crate::rdb::parser::Parser;
 use crate::storage::Entry;
+use anyhow::Context;
 use std::collections::HashMap;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::num::ParseIntError;
@@ -36,6 +37,8 @@ async fn handle_connection(
     replica_opt: Arc<Option<(Option<String>, Option<u16>)>>,
 ) {
     println!("accepted new connection, addr {}", addr);
+
+    let mut replica_stream = None;
 
     let mut buf = [0; 512];
     while stream.read(&mut buf).await.is_ok_and(|n| n > 0) {
@@ -71,6 +74,13 @@ async fn handle_connection(
                         let val = arr.get(2).unwrap();
 
                         let px = arr.get(3);
+
+                        // propagate SET command
+                        replica_stream.as_mut().map(|s: &mut TcpStream| async {
+                            let data = RESP::Array(arr.clone());
+                            println!("propagate: {}", data.encode());
+                            s.write_all(data.encode().as_bytes()).await.unwrap();
+                        });
 
                         if let RESP::BulkString(Some(key)) = key {
                             if let RESP::BulkString(Some(val)) = val {
@@ -129,7 +139,30 @@ async fn handle_connection(
                         RESP::Array(arr)
                     }
 
-                    "replconf" => RESP::SimpleString("OK".into()),
+                    "replconf" => {
+                        let param = arr.get(1).unwrap();
+                        if let RESP::BulkString(Some(param)) = param {
+                            if param == "listening-port" {
+                                let port = arr.get(2).unwrap();
+                                if let RESP::BulkString(Some(port)) = port {
+                                    let port: u16 = port.parse().unwrap();
+                                    replica_stream =
+                                        TcpStream::connect(format!("127.0.0.1:{}", port))
+                                            .await
+                                            .map_err(|e| {
+                                                println!("connect to replica failed: {}", e);
+                                                e
+                                            })
+                                            .ok();
+                                    println!(
+                                        "init replica stream, ok: {}",
+                                        replica_stream.is_some()
+                                    );
+                                }
+                            }
+                        }
+                        RESP::SimpleString("OK".into())
+                    }
 
                     "psync" => RESP::SimpleString(
                         "FULLRESYNC 8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb 0".into(),
@@ -226,19 +259,21 @@ async fn handshake(
         stream.write_all(resp.encode().as_bytes()).await?;
 
         // The replica sends REPLCONF twice to the master
-        let resp = RESP::Array(vec![
+        let resp1 = RESP::Array(vec![
             RESP::BulkString(Some("REPLCONF".into())),
             RESP::BulkString(Some("listening-port".into())),
             RESP::BulkString(Some(listening_port.to_string())),
         ]);
-        stream.write_all(resp.encode().as_bytes()).await?;
 
-        let resp = RESP::Array(vec![
+        let resp2 = RESP::Array(vec![
             RESP::BulkString(Some("REPLCONF".into())),
             RESP::BulkString(Some("capa".into())),
             RESP::BulkString(Some("psync2".into())),
         ]);
-        stream.write_all(resp.encode().as_bytes()).await?;
+
+        let mut data = resp1.encode().into_bytes();
+        data.extend_from_slice(resp2.encode().as_bytes());
+        stream.write_all(&data).await?;
 
         let mut buf = [0; 512];
         stream.read(&mut buf).await?;
