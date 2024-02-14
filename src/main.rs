@@ -120,6 +120,8 @@ async fn handle_connection(
                         RESP::Array(arr)
                     }
 
+                    "replconf" => RESP::SimpleString("OK".into()),
+
                     "info" => {
                         if replica_opt.is_none() {
                             RESP::BulkString(Some("role:master\nmaster_replid:8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb\nmaster_repl_offset:0".into()))
