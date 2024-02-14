@@ -19,7 +19,8 @@ use std::{env, io, vec};
 use tokio::fs::File;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::Mutex;
+use tokio::sync::mpsc::Sender;
+use tokio::sync::{mpsc, Mutex};
 
 fn decode_hex(s: &str) -> Result<Vec<u8>, ParseIntError> {
     (0..s.len())
@@ -29,19 +30,29 @@ fn decode_hex(s: &str) -> Result<Vec<u8>, ParseIntError> {
 }
 
 async fn handle_connection(
-    mut stream: TcpStream,
+    stream: TcpStream,
     addr: SocketAddr,
     db: Arc<Mutex<HashMap<String, Entry>>>,
     dir: Arc<Option<String>>,
     db_filename: Arc<Option<String>>,
     replica_opt: Arc<Option<(Option<String>, Option<u16>)>>,
+    replicas: Arc<Mutex<Vec<Arc<Mutex<TcpStream>>>>>,
+    tx: Sender<RESP>,
 ) {
     println!("accepted new connection, addr {}", addr);
 
-    let mut replica_stream = None;
+    let stream = Arc::new(Mutex::new(stream));
+
+    let replicas_clone = Arc::clone(&replicas);
 
     let mut buf = [0; 512];
-    while stream.read(&mut buf).await.is_ok_and(|n| n > 0) {
+    while stream
+        .lock()
+        .await
+        .read(&mut buf)
+        .await
+        .is_ok_and(|n| n > 0)
+    {
         let s = String::from_utf8_lossy(&buf);
 
         let resp: RESP = s.parse().unwrap();
@@ -76,11 +87,14 @@ async fn handle_connection(
                         let px = arr.get(3);
 
                         // propagate SET command
-                        replica_stream.as_mut().map(|s: &mut TcpStream| async {
-                            let data = RESP::Array(arr.clone());
-                            println!("propagate: {}", data.encode());
-                            s.write_all(data.encode().as_bytes()).await.unwrap();
-                        });
+                        {
+                            let arr_clone = arr.clone();
+                            let tx = tx.clone();
+                            tokio::spawn(async move {
+                                let data = RESP::Array(arr_clone);
+                                tx.send(data).await.unwrap();
+                            });
+                        }
 
                         if let RESP::BulkString(Some(key)) = key {
                             if let RESP::BulkString(Some(val)) = val {
@@ -144,21 +158,7 @@ async fn handle_connection(
                         if let RESP::BulkString(Some(param)) = param {
                             if param == "listening-port" {
                                 let port = arr.get(2).unwrap();
-                                if let RESP::BulkString(Some(port)) = port {
-                                    let port: u16 = port.parse().unwrap();
-                                    replica_stream =
-                                        TcpStream::connect(format!("127.0.0.1:{}", port))
-                                            .await
-                                            .map_err(|e| {
-                                                println!("connect to replica failed: {}", e);
-                                                e
-                                            })
-                                            .ok();
-                                    println!(
-                                        "init replica stream, ok: {}",
-                                        replica_stream.is_some()
-                                    );
-                                }
+                                if let RESP::BulkString(Some(port)) = port {}
                             }
                         }
                         RESP::SimpleString("OK".into())
@@ -181,14 +181,22 @@ async fn handle_connection(
                     _ => unimplemented!(),
                 };
 
-                stream.write_all(resp.encode().as_bytes()).await.unwrap();
+                stream
+                    .lock()
+                    .await
+                    .write_all(resp.encode().as_bytes())
+                    .await
+                    .unwrap();
 
                 if cmd.to_lowercase() == "psync" {
                     println!("send rdb");
                     let binary_rdb = decode_hex(consts::EMPTY_RDB).unwrap();
                     let mut data = format!("${}\r\n", binary_rdb.len()).into_bytes();
                     data.extend(binary_rdb);
-                    stream.write_all(&data).await.unwrap();
+                    stream.lock().await.write_all(&data).await.unwrap();
+
+                    replicas_clone.lock().await.push(stream.clone());
+                    println!("push replicas")
                 }
             } else {
                 unreachable!()
@@ -361,14 +369,51 @@ async fn main() {
 
     handshake(port, replica_opt.clone()).await.unwrap();
 
+    let replicas: Arc<Mutex<Vec<Arc<Mutex<TcpStream>>>>> = Arc::new(Mutex::new(vec![]));
+    let replicas_clone = Arc::clone(&replicas);
+
+    let (tx, mut rx) = mpsc::channel::<RESP>(10);
+
+    tokio::spawn(async move {
+        while let Some(resp) = rx.recv().await {
+            println!(
+                "replica recv command: {:?}, replicas len: {}",
+                resp,
+                replicas.lock().await.len()
+            );
+            for replica in replicas.lock().await.iter() {
+                println!("prepare send");
+                replica
+                    .lock()
+                    .await
+                    .write_all(resp.encode().as_bytes())
+                    .await
+                    .context("failed to propagate")
+                    .unwrap();
+            }
+        }
+    });
+
     while let Ok((stream, addr)) = listener.accept().await {
         let db = db.clone();
         let dir = dir.clone();
         let db_filename = db_filename.clone();
         let replica_opt = replica_opt.clone();
+        let replicas_clone = Arc::clone(&replicas_clone);
+        let tx = tx.clone();
 
         tokio::spawn(async move {
-            handle_connection(stream, addr, db, dir, db_filename, replica_opt).await
+            handle_connection(
+                stream,
+                addr,
+                db,
+                dir,
+                db_filename,
+                replica_opt,
+                replicas_clone,
+                tx,
+            )
+            .await
         });
     }
 }

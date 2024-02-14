@@ -93,8 +93,12 @@ impl<'a> Decoder<'a> {
                 self.pos += 1;
                 self.parse_simple_string()
             }
+            b' ' => {
+                self.pos += 1;
+                self.parse()
+            }
             _ => {
-                println!("cmd: {}", cmd);
+                println!("invalid cmd: <{}>`", cmd);
                 unreachable!()
             }
         }
