@@ -46,155 +46,159 @@ async fn handle_connection(
 
     let writer = Arc::new(Mutex::new(streams.1));
 
-    let mut buf = [0; 512];
-    while stream.read(&mut buf).await.is_ok_and(|n| n > 0) {
-        let s = String::from_utf8_lossy(&buf);
+    // FIXME: It's possible to get 10 bytes, then 1000 and then 14 bytes on the last read()
+    // There is no RESP message boundary. Need to decode in a loop till you get data all
+    let mut buf = [0; 1024];
+    while let Ok(n) = stream.read(&mut buf).await {
+        if n == 0 {
+            println!("stream closed");
+            break;
+        }
+        let s = String::from_utf8_lossy(&buf[..n]);
+        let mut decoder = Decoder::new(s.as_ref());
 
-        let resp: RESP = s.parse().unwrap();
-        println!("command str: {}, recv command: {:?}", s, resp);
+        println!("command str: {:?}", s);
 
-        if let RESP::Array(arr) = resp {
-            if let Some(RESP::BulkString(Some(cmd))) = arr.first() {
-                let resp = match cmd.to_lowercase().as_str() {
-                    "echo" => arr.get(1).cloned().unwrap(),
-                    "get" => {
-                        let key = arr.get(1).unwrap();
+        while let Some(resp) = decoder.parse() {
+            println!("recv command: {:?}", resp);
+            if let RESP::Array(arr) = resp {
+                if let Some(RESP::BulkString(Some(cmd))) = arr.first() {
+                    let resp = match cmd.to_lowercase().as_str() {
+                        "echo" => arr.get(1).cloned().unwrap(),
+                        "get" => {
+                            let key = arr.get(1).unwrap();
 
-                        if let RESP::BulkString(Some(key)) = key {
-                            match db.lock().await.get(key) {
-                                Some(e) => {
-                                    if e.exp.is_none() || e.exp.unwrap() > SystemTime::now() {
-                                        RESP::BulkString(Some(e.val.clone()))
+                            if let RESP::BulkString(Some(key)) = key {
+                                match db.lock().await.get(key) {
+                                    Some(e) => {
+                                        if e.exp.is_none() || e.exp.unwrap() > SystemTime::now() {
+                                            RESP::BulkString(Some(e.val.clone()))
+                                        } else {
+                                            RESP::BulkString(None)
+                                        }
+                                    }
+                                    None => RESP::BulkString(None),
+                                }
+                            } else {
+                                unreachable!()
+                            }
+                        }
+                        "set" => {
+                            let key = arr.get(1).unwrap();
+                            let val = arr.get(2).unwrap();
+
+                            let px = arr.get(3);
+
+                            // propagate SET command
+                            let data = RESP::Array(arr.clone());
+                            tx.send(data).await.unwrap();
+
+                            if let RESP::BulkString(Some(key)) = key {
+                                if let RESP::BulkString(Some(val)) = val {
+                                    let mut entry = Entry {
+                                        val: val.to_string(),
+                                        exp: None,
+                                    };
+                                    if px.is_some_and(|x| {
+                                        *x == RESP::BulkString(Some("px".to_string()))
+                                    }) {
+                                        let exp = arr.get(4).unwrap();
+                                        if let RESP::BulkString(Some(e)) = exp {
+                                            let exp: u64 = e.parse().unwrap();
+                                            entry.exp = Some(
+                                                SystemTime::now().add(Duration::from_millis(exp)),
+                                            );
+                                        }
+                                    }
+                                    db.lock().await.insert(key.to_string(), entry);
+                                }
+                            }
+
+                            RESP::SimpleString("OK".into())
+                        }
+
+                        "config" => {
+                            let conf_name = arr.get(2).unwrap();
+                            match conf_name {
+                                RESP::BulkString(Some(x)) => {
+                                    if x == "dir" {
+                                        RESP::Array(vec![
+                                            RESP::BulkString(Some(x.clone())),
+                                            RESP::BulkString(dir.as_ref().clone()),
+                                        ])
+                                    } else if x == "dbfilename" {
+                                        let db_filename = db_filename.clone();
+                                        RESP::Array(vec![
+                                            RESP::BulkString(Some(x.clone())),
+                                            RESP::BulkString(db_filename.as_ref().clone()),
+                                        ])
                                     } else {
-                                        RESP::BulkString(None)
+                                        unreachable!();
                                     }
                                 }
-                                None => RESP::BulkString(None),
-                            }
-                        } else {
-                            unreachable!()
-                        }
-                    }
-                    "set" => {
-                        let key = arr.get(1).unwrap();
-                        let val = arr.get(2).unwrap();
-
-                        let px = arr.get(3);
-
-                        // propagate SET command
-                        {
-                            let arr_clone = arr.clone();
-                            let tx = tx.clone();
-                            tokio::spawn(async move {
-                                let data = RESP::Array(arr_clone);
-                                tx.send(data).await.unwrap();
-                            });
-                        }
-
-                        if let RESP::BulkString(Some(key)) = key {
-                            if let RESP::BulkString(Some(val)) = val {
-                                let mut entry = Entry {
-                                    val: val.to_string(),
-                                    exp: None,
-                                };
-                                if px
-                                    .is_some_and(|x| *x == RESP::BulkString(Some("px".to_string())))
-                                {
-                                    let exp = arr.get(4).unwrap();
-                                    if let RESP::BulkString(Some(e)) = exp {
-                                        let exp: u64 = e.parse().unwrap();
-                                        entry.exp =
-                                            Some(SystemTime::now().add(Duration::from_millis(exp)));
-                                    }
-                                }
-                                db.lock().await.insert(key.to_string(), entry);
+                                _ => unreachable!(),
                             }
                         }
 
-                        RESP::SimpleString("OK".into())
-                    }
+                        "keys" => {
+                            let arr = db
+                                .lock()
+                                .await
+                                .keys()
+                                .map(|x| RESP::BulkString(Some(x.clone())))
+                                .collect::<Vec<RESP>>();
 
-                    "config" => {
-                        let conf_name = arr.get(2).unwrap();
-                        match conf_name {
-                            RESP::BulkString(Some(x)) => {
-                                if x == "dir" {
-                                    RESP::Array(vec![
-                                        RESP::BulkString(Some(x.clone())),
-                                        RESP::BulkString(dir.as_ref().clone()),
-                                    ])
-                                } else if x == "dbfilename" {
-                                    let db_filename = db_filename.clone();
-                                    RESP::Array(vec![
-                                        RESP::BulkString(Some(x.clone())),
-                                        RESP::BulkString(db_filename.as_ref().clone()),
-                                    ])
-                                } else {
-                                    unreachable!();
+                            RESP::Array(arr)
+                        }
+
+                        "replconf" => {
+                            let param = arr.get(1).unwrap();
+                            if let RESP::BulkString(Some(param)) = param {
+                                if param == "listening-port" {
+                                    let port = arr.get(2).unwrap();
+                                    if let RESP::BulkString(Some(port)) = port {}
                                 }
                             }
-                            _ => unreachable!(),
+                            RESP::SimpleString("OK".into())
                         }
-                    }
 
-                    "keys" => {
-                        let arr = db
-                            .lock()
-                            .await
-                            .keys()
-                            .map(|x| RESP::BulkString(Some(x.clone())))
-                            .collect::<Vec<RESP>>();
+                        "psync" => RESP::SimpleString(
+                            "FULLRESYNC 8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb 0".into(),
+                        ),
 
-                        RESP::Array(arr)
-                    }
-
-                    "replconf" => {
-                        let param = arr.get(1).unwrap();
-                        if let RESP::BulkString(Some(param)) = param {
-                            if param == "listening-port" {
-                                let port = arr.get(2).unwrap();
-                                if let RESP::BulkString(Some(port)) = port {}
+                        "info" => {
+                            if replica_opt.is_none() {
+                                RESP::BulkString(Some("role:master\nmaster_replid:8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb\nmaster_repl_offset:0".into()))
+                            } else {
+                                RESP::BulkString(Some("role:slave".into()))
                             }
                         }
-                        RESP::SimpleString("OK".into())
+
+                        "ping" => RESP::SimpleString("PONG".into()),
+
+                        _ => unimplemented!(),
+                    };
+
+                    writer
+                        .lock()
+                        .await
+                        .write_all(resp.encode().as_bytes())
+                        .await
+                        .unwrap();
+
+                    if cmd.to_lowercase() == "psync" {
+                        println!("send rdb");
+                        let binary_rdb = decode_hex(consts::EMPTY_RDB).unwrap();
+                        let mut data = format!("${}\r\n", binary_rdb.len()).into_bytes();
+                        data.extend(binary_rdb);
+                        writer.lock().await.write_all(&data).await.unwrap();
+
+                        replicas.lock().await.push(writer.clone());
+                        println!("push replicas")
                     }
-
-                    "psync" => RESP::SimpleString(
-                        "FULLRESYNC 8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb 0".into(),
-                    ),
-
-                    "info" => {
-                        if replica_opt.is_none() {
-                            RESP::BulkString(Some("role:master\nmaster_replid:8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb\nmaster_repl_offset:0".into()))
-                        } else {
-                            RESP::BulkString(Some("role:slave".into()))
-                        }
-                    }
-
-                    "ping" => RESP::SimpleString("PONG".into()),
-
-                    _ => unimplemented!(),
-                };
-
-                writer
-                    .lock()
-                    .await
-                    .write_all(resp.encode().as_bytes())
-                    .await
-                    .unwrap();
-
-                if cmd.to_lowercase() == "psync" {
-                    println!("send rdb");
-                    let binary_rdb = decode_hex(consts::EMPTY_RDB).unwrap();
-                    let mut data = format!("${}\r\n", binary_rdb.len()).into_bytes();
-                    data.extend(binary_rdb);
-                    writer.lock().await.write_all(&data).await.unwrap();
-
-                    replicas.lock().await.push(writer.clone());
-                    println!("push replicas")
+                } else {
+                    unreachable!()
                 }
-            } else {
-                unreachable!()
             }
         }
     }
@@ -279,18 +283,18 @@ async fn handshake(
         stream.write_all(&data).await?;
 
         let mut buf = [0; 512];
-        stream.read(&mut buf).await?;
+        let n = stream.read(&mut buf).await?;
 
-        let s = String::from_utf8_lossy(&buf);
-        let mut parser = Decoder::new(s.as_ref());
+        let s = String::from_utf8_lossy(&buf[..n]);
+        let mut decoder = Decoder::new(s.as_ref());
 
-        let resp = parser.parse();
+        let resp = decoder.parse();
         assert_eq!(Some(RESP::SimpleString("PONG".into())), resp);
 
-        let resp = parser.parse();
+        let resp = decoder.parse();
         assert_eq!(Some(RESP::SimpleString("OK".into())), resp);
 
-        let resp = parser.parse();
+        let resp = decoder.parse();
         assert_eq!(Some(RESP::SimpleString("OK".into())), resp);
 
         let resp = RESP::Array(vec![

@@ -80,21 +80,21 @@ impl<'a> Decoder<'a> {
 
         let cmd = &self.input[self.pos..];
 
-        match cmd.as_bytes()[0] {
-            b'*' => {
+        match cmd.chars().next() {
+            Some('*') => {
                 self.pos += 1;
                 self.parse_array()
             }
-            b'$' => {
+            Some('$') => {
                 self.pos += 1;
                 self.parse_bulk_string()
             }
-            b'+' => {
+            Some('+') => {
                 self.pos += 1;
                 self.parse_simple_string()
             }
             _ => {
-                println!("invalid cmd: <{}>", cmd);
+                println!("invalid cmd: <{:?}>", cmd);
                 unreachable!()
             }
         }
