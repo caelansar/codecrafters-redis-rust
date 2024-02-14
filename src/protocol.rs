@@ -79,7 +79,6 @@ impl<'a> Decoder<'a> {
         }
 
         let cmd = &self.input[self.pos..];
-        println!("cmd: {}", cmd);
 
         match cmd.as_bytes()[0] {
             b'*' => {

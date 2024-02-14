@@ -122,6 +122,10 @@ async fn handle_connection(
 
                     "replconf" => RESP::SimpleString("OK".into()),
 
+                    "psync" => RESP::SimpleString(
+                        "FULLRESYNC 8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb 0".into(),
+                    ),
+
                     "info" => {
                         if replica_opt.is_none() {
                             RESP::BulkString(Some("role:master\nmaster_replid:8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb\nmaster_repl_offset:0".into()))
@@ -130,7 +134,9 @@ async fn handle_connection(
                         }
                     }
 
-                    _ => RESP::SimpleString("PONG".into()),
+                    "ping" => RESP::SimpleString("PONG".into()),
+
+                    _ => unimplemented!()
                 };
 
                 stream.write_all(resp.encode().as_bytes()).await.unwrap();
