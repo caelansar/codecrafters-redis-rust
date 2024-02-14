@@ -3,10 +3,12 @@ mod rdb;
 mod storage;
 
 use crate::protocol::{Decoder, RESP};
+use crate::rdb::consts;
 use crate::rdb::parser::Parser;
 use crate::storage::Entry;
 use std::collections::HashMap;
 use std::net::{Ipv4Addr, SocketAddr};
+use std::num::ParseIntError;
 use std::ops::Add;
 use std::path::Path;
 use std::str::FromStr;
@@ -17,6 +19,13 @@ use tokio::fs::File;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Mutex;
+
+fn decode_hex(s: &str) -> Result<Vec<u8>, ParseIntError> {
+    (0..s.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&s[i..i + 2], 16))
+        .collect()
+}
 
 async fn handle_connection(
     mut stream: TcpStream,
@@ -29,7 +38,7 @@ async fn handle_connection(
     println!("accepted new connection, addr {}", addr);
 
     let mut buf = [0; 512];
-    while stream.read(&mut buf).await.is_ok() {
+    while stream.read(&mut buf).await.is_ok_and(|n| n > 0) {
         let s = String::from_utf8_lossy(&buf);
 
         let resp: RESP = s.parse().unwrap();
@@ -136,10 +145,18 @@ async fn handle_connection(
 
                     "ping" => RESP::SimpleString("PONG".into()),
 
-                    _ => unimplemented!()
+                    _ => unimplemented!(),
                 };
 
                 stream.write_all(resp.encode().as_bytes()).await.unwrap();
+
+                if cmd.to_lowercase() == "psync" {
+                    println!("send rdb");
+                    let binary_rdb = decode_hex(consts::EMPTY_RDB).unwrap();
+                    let mut data = format!("${}\r\n", binary_rdb.len()).into_bytes();
+                    data.extend(binary_rdb);
+                    stream.write_all(&data).await.unwrap();
+                }
             } else {
                 unreachable!()
             }

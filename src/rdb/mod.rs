@@ -1,6 +1,6 @@
 use tokio::io::{AsyncRead, AsyncReadExt};
 
-mod consts;
+pub mod consts;
 mod encoding;
 pub mod parser;
 
