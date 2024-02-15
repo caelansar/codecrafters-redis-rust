@@ -19,7 +19,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 use std::{env, io, vec};
 use tokio::fs::File;
-use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncWriteExt, BufReader};
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc::Sender;
@@ -56,7 +56,7 @@ async fn handle_connection(
         if let RESP::Array(arr) = resp {
             if let Some(RESP::BulkString(Some(cmd))) = arr.first() {
                 let resp = match cmd.to_lowercase().as_str() {
-                    "echo" => arr.get(1).cloned().unwrap(),
+                    "echo" => arr.get(1).cloned(),
                     "get" => {
                         let key = arr.get(1).unwrap();
 
@@ -64,12 +64,12 @@ async fn handle_connection(
                             match db.lock().await.get(key) {
                                 Some(e) => {
                                     if e.exp.is_none() || e.exp.unwrap() > SystemTime::now() {
-                                        RESP::BulkString(Some(e.val.clone()))
+                                        Some(RESP::BulkString(Some(e.val.clone())))
                                     } else {
-                                        RESP::BulkString(None)
+                                        Some(RESP::BulkString(None))
                                     }
                                 }
-                                None => RESP::BulkString(None),
+                                None => Some(RESP::BulkString(None)),
                             }
                         } else {
                             unreachable!()
@@ -82,8 +82,10 @@ async fn handle_connection(
                         let px = arr.get(3);
 
                         // propagate SET command
-                        let data = RESP::Array(arr.clone());
-                        tx.send(data).await.unwrap();
+                        if replica_opt.is_none() {
+                            let data = RESP::Array(arr.clone());
+                            tx.send(data).await.unwrap();
+                        }
 
                         if let RESP::BulkString(Some(key)) = key {
                             if let RESP::BulkString(Some(val)) = val {
@@ -105,7 +107,7 @@ async fn handle_connection(
                             }
                         }
 
-                        RESP::SimpleString("OK".into())
+                        Some(RESP::SimpleString("OK".into()))
                     }
 
                     "config" => {
@@ -113,16 +115,16 @@ async fn handle_connection(
                         match conf_name {
                             RESP::BulkString(Some(x)) => {
                                 if x == "dir" {
-                                    RESP::Array(vec![
+                                    Some(RESP::Array(vec![
                                         RESP::BulkString(Some(x.clone())),
                                         RESP::BulkString(dir.as_ref().clone()),
-                                    ])
+                                    ]))
                                 } else if x == "dbfilename" {
                                     let db_filename = db_filename.clone();
-                                    RESP::Array(vec![
+                                    Some(RESP::Array(vec![
                                         RESP::BulkString(Some(x.clone())),
                                         RESP::BulkString(db_filename.as_ref().clone()),
-                                    ])
+                                    ]))
                                 } else {
                                     unreachable!();
                                 }
@@ -139,43 +141,45 @@ async fn handle_connection(
                             .map(|x| RESP::BulkString(Some(x.clone())))
                             .collect::<Vec<RESP>>();
 
-                        RESP::Array(arr)
+                        Some(RESP::Array(arr))
                     }
 
                     "replconf" => {
-                        let param = arr.get(1).unwrap();
-                        if let RESP::BulkString(Some(param)) = param {
-                            if param == "listening-port" {
-                                let port = arr.get(2).unwrap();
-                                if let RESP::BulkString(Some(port)) = port {}
-                            }
-                        }
-                        RESP::SimpleString("OK".into())
+                        // let param = arr.get(1).unwrap();
+                        // if let RESP::BulkString(Some(param)) = param {
+                        //     if param == "listening-port" {
+                        //         let port = arr.get(2).unwrap();
+                        //         if let RESP::BulkString(Some(port)) = port {}
+                        //     }
+                        // }
+                        Some(RESP::SimpleString("OK".into()))
                     }
 
-                    "psync" => RESP::SimpleString(
+                    "psync" => Some(RESP::SimpleString(
                         "FULLRESYNC 8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb 0".into(),
-                    ),
+                    )),
 
                     "info" => {
                         if replica_opt.is_none() {
-                            RESP::BulkString(Some("role:master\nmaster_replid:8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb\nmaster_repl_offset:0".into()))
+                            Some(RESP::BulkString(Some("role:master\nmaster_replid:8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb\nmaster_repl_offset:0".into())))
                         } else {
-                            RESP::BulkString(Some("role:slave".into()))
+                            Some(RESP::BulkString(Some("role:slave".into())))
                         }
                     }
 
-                    "ping" => RESP::SimpleString("PONG".into()),
+                    "ping" => Some(RESP::SimpleString("PONG".into())),
 
                     _ => unimplemented!(),
                 };
 
-                writer
-                    .lock()
-                    .await
-                    .write_all(resp.encode().as_bytes())
-                    .await
-                    .unwrap();
+                if let Some(resp) = resp {
+                    writer
+                        .lock()
+                        .await
+                        .write_all(resp.encode().as_bytes())
+                        .await
+                        .unwrap();
+                }
 
                 if cmd.to_lowercase() == "psync" {
                     println!("send rdb");
@@ -247,10 +251,11 @@ async fn init_db(dir: &Option<String>, db_filename: &Option<String>) -> HashMap<
 async fn handshake(
     listening_port: u16,
     replica_opt: Arc<Option<(Option<String>, Option<u16>)>>,
+    db: Arc<Mutex<HashMap<String, Entry>>>,
 ) -> anyhow::Result<()> {
     if let Some((Some(host), Some(port))) = replica_opt.as_ref() {
-        let mut stream = TcpStream::connect(format!("{}:{}", host, port)).await?;
-        let (reader, mut writer) = stream.split();
+        let stream = TcpStream::connect(format!("{}:{}", host, port)).await?;
+        let (reader, mut writer) = stream.into_split();
         let mut conn = Connection::new(reader);
 
         // The replica sends a PING to the master
@@ -290,8 +295,61 @@ async fn handshake(
         ]);
         writer.write_all(resp.encode().as_bytes()).await?;
 
+        println!("PSYNC sent");
+
         let resp = conn.read_frame().await?;
         assert!(matches!(resp, Some(RESP::SimpleString(_))));
+
+        println!("recv FULLRESYNC");
+
+        // recv empty rdb
+        let n = conn.skip_rdb().await.context("failed to read rdb")?;
+        println!("receive RDB file, n: {}", n);
+        if n == 0 {
+            return Ok(());
+        }
+
+        tokio::spawn(async move {
+            println!("handle propagated commands from master");
+            while let Ok(Some(resp)) = conn.read_frame().await {
+                println!("replica receive command from master: {:?}", resp);
+                if let RESP::Array(arr) = resp {
+                    if let Some(RESP::BulkString(Some(cmd))) = arr.first() {
+                        match cmd.to_lowercase().as_str() {
+                            "set" => {
+                                let key = arr.get(1).unwrap();
+                                let val = arr.get(2).unwrap();
+
+                                let px = arr.get(3);
+
+                                if let RESP::BulkString(Some(key)) = key {
+                                    if let RESP::BulkString(Some(val)) = val {
+                                        let mut entry = Entry {
+                                            val: val.to_string(),
+                                            exp: None,
+                                        };
+                                        if px.is_some_and(|x| {
+                                            *x == RESP::BulkString(Some("px".to_string()))
+                                        }) {
+                                            let exp = arr.get(4).unwrap();
+                                            if let RESP::BulkString(Some(e)) = exp {
+                                                let exp: u64 = e.parse().unwrap();
+                                                entry.exp = Some(
+                                                    SystemTime::now()
+                                                        .add(Duration::from_millis(exp)),
+                                                );
+                                            }
+                                        }
+                                        db.lock().await.insert(key.to_string(), entry);
+                                    }
+                                }
+                            }
+                            _ => unreachable!(),
+                        };
+                    }
+                }
+            }
+        });
     }
 
     Ok(())
@@ -347,7 +405,9 @@ async fn main() {
     let dir = Arc::new(dir);
     let db_filename = Arc::new(db_filename);
 
-    handshake(port, replica_opt.clone()).await.unwrap();
+    handshake(port, replica_opt.clone(), db.clone())
+        .await
+        .unwrap();
 
     let replicas: Arc<Mutex<Vec<Arc<Mutex<OwnedWriteHalf>>>>> = Arc::new(Mutex::new(vec![]));
     let replicas_clone = Arc::clone(&replicas);

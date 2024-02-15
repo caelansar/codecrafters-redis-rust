@@ -20,6 +20,12 @@ impl<R: AsyncRead + Unpin> Connection<R> {
         }
     }
 
+    pub async fn skip_rdb(&mut self) -> anyhow::Result<usize> {
+        let mut empty_rdb = [0u8; 93];
+        let n = self.stream.read(&mut empty_rdb).await?;
+        Ok(n)
+    }
+
     /// Read a single `Frame` value from the underlying stream.
     ///
     /// The function waits until it has retrieved enough data to parse a frame.
@@ -74,6 +80,8 @@ impl<R: AsyncRead + Unpin> Connection<R> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::decode_hex;
+    use crate::rdb::consts;
     use tokio::io::BufReader;
 
     #[tokio::test]
@@ -87,5 +95,13 @@ mod tests {
 
         let resp = conn.read_frame().await.unwrap();
         assert_eq!(Some(RESP::SimpleString("PING".to_string())), resp);
+    }
+
+    #[tokio::test]
+    async fn decode_empty_rdb() {
+        let binary_rdb = decode_hex(consts::EMPTY_RDB).unwrap();
+        let mut data = format!("${}\r\n", binary_rdb.len()).into_bytes();
+        data.extend(binary_rdb);
+        assert_eq!(93, data.len())
     }
 }
