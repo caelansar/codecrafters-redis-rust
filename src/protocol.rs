@@ -19,12 +19,20 @@ pub enum RESP {
     Null,
 }
 
+#[derive(thiserror::Error, Debug, PartialEq)]
+pub enum Error {
+    #[error("Incomplete resp frame")]
+    Incomplete,
+    #[error("Invalid frame format")]
+    InvalidFormat,
+}
+
 impl FromStr for RESP {
-    type Err = &'static str;
+    type Err = Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let mut parser = Decoder::new(s);
-        parser.parse().ok_or("parse failed")
+        parser.parse().map(|x| x.unwrap())
     }
 }
 
@@ -73,9 +81,14 @@ impl<'a> Decoder<'a> {
     pub(crate) fn new(input: &'a str) -> Decoder<'a> {
         Decoder { input, pos: 0 }
     }
-    pub(crate) fn parse(&mut self) -> Option<RESP> {
+
+    pub(crate) fn position(&self) -> usize {
+        self.pos
+    }
+
+    pub(crate) fn parse(&mut self) -> Result<Option<RESP>, Error> {
         if self.pos >= self.input.len() {
-            return None;
+            return Ok(None);
         }
 
         let cmd = &self.input[self.pos..];
@@ -99,67 +112,80 @@ impl<'a> Decoder<'a> {
             }
         }
     }
-    fn parse_array(&mut self) -> Option<RESP> {
+    fn parse_array(&mut self) -> Result<Option<RESP>, Error> {
         if self.pos >= self.input.len() {
-            return None;
+            return Err(Error::Incomplete);
         }
 
         let cmd = &self.input[self.pos..];
 
         let res = cmd.chars().take_while(|x| *x != '\r').collect::<String>();
-        let item_count: usize = res.parse().unwrap();
+        let item_count: usize = res.parse().map_err(|e| Error::InvalidFormat)?;
 
         self.pos += res.len();
         self.pos += 2;
 
         let mut arr = Vec::with_capacity(item_count);
 
-        (0..item_count).for_each(|_| {
-            let item = self.parse();
+        (0..item_count).try_for_each(|_| {
+            let item = self.parse()?;
             if let Some(item) = item {
                 arr.push(item);
             }
-        });
+            Ok(())
+        })?;
 
-        Some(RESP::Array(arr))
+        Ok(Some(RESP::Array(arr)))
     }
 
-    fn parse_simple_string(&mut self) -> Option<RESP> {
+    fn parse_simple_string(&mut self) -> Result<Option<RESP>, Error> {
         if self.pos >= self.input.len() {
-            return None;
+            return Err(Error::Incomplete);
         }
 
         let cmd = &self.input[self.pos..];
 
         let res = cmd.chars().take_while(|x| *x != '\r').collect::<String>();
 
-        self.pos += res.len() + 2;
+        self.pos += res.len();
 
-        Some(RESP::SimpleString(res))
+        if !&self.input[self.pos..].starts_with("\r\n") {
+            return Err(Error::Incomplete);
+        }
+        self.pos += 2;
+
+        Ok(Some(RESP::SimpleString(res)))
     }
 
-    fn parse_bulk_string(&mut self) -> Option<RESP> {
+    fn parse_bulk_string(&mut self) -> Result<Option<RESP>, Error> {
         if self.pos >= self.input.len() {
-            return None;
+            return Err(Error::Incomplete);
         }
         let mut s = String::new();
 
         let cmd = &self.input[self.pos..];
 
         let res = cmd.chars().take_while(|x| *x != '\r').collect::<String>();
-        let len: usize = res.parse().unwrap();
+        let len: usize = res.parse().map_err(|e| Error::InvalidFormat)?;
 
-        self.pos += 2;
         self.pos += res.len();
+        if !&self.input[self.pos..].starts_with("\r\n") {
+            return Err(Error::Incomplete);
+        }
+        self.pos += 2;
 
         let cmd = &cmd[2 + res.len()..];
+
+        if cmd.len() < len {
+            return Err(Error::Incomplete);
+        }
 
         s.push_str(&cmd[0..len]);
 
         self.pos += len;
         self.pos += 2;
 
-        Some(RESP::BulkString(Some(s)))
+        Ok(Some(RESP::BulkString(Some(s))))
     }
 }
 
@@ -169,34 +195,44 @@ mod tests {
 
     struct Testcase {
         cmd: &'static str,
-        resp: RESP,
+        resp: Result<RESP, Error>,
     }
     #[test]
     fn test_parse_string() {
         let testcases = vec![
             Testcase {
                 cmd: "+OK\r\n",
-                resp: RESP::SimpleString("OK".into()),
+                resp: Ok(RESP::SimpleString("OK".into())),
+            },
+            Testcase {
+                cmd: "+OK\r",
+                resp: Err(Error::Incomplete),
             },
             Testcase {
                 cmd: "$5\r\nhello\r\n",
-                resp: RESP::BulkString(Some("hello".into())),
+                resp: Ok(RESP::BulkString(Some("hello".into()))),
+            },
+            Testcase {
+                cmd: "$5",
+                resp: Err(Error::Incomplete),
             },
             Testcase {
                 cmd: "*2\r\n$4\r\nECHO\r\n$3\r\nhey\r\n",
-                resp: RESP::Array(vec![
+                resp: Ok(RESP::Array(vec![
                     RESP::BulkString(Some("ECHO".into())),
                     RESP::BulkString(Some("hey".into())),
-                ]),
+                ])),
             },
         ];
 
         testcases.iter().for_each(|testcase| {
-            let resp: RESP = testcase.cmd.parse().unwrap();
+            let resp: Result<RESP, Error> = testcase.cmd.parse();
             assert_eq!(testcase.resp, resp);
 
-            let s: String = resp.into();
-            assert_eq!(testcase.cmd, s);
+            if let Ok(resp) = resp {
+                let s: String = resp.into();
+                assert_eq!(testcase.cmd, s);
+            }
         })
     }
 }
