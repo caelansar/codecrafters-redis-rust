@@ -312,11 +312,14 @@ async fn handshake(
         tokio::spawn(async move {
             println!("handle propagated commands from master");
             while let Ok(Some(resp)) = conn.read_frame().await {
+                let mut db_guard = db.lock().await;
                 println!("replica receive command from master: {:?}", resp);
                 if let RESP::Array(arr) = resp {
                     if let Some(RESP::BulkString(Some(cmd))) = arr.first() {
                         match cmd.to_lowercase().as_str() {
                             "replconf" => {
+                                drop(db_guard);
+
                                 let resp = RESP::Array(vec![
                                     RESP::BulkString(Some("REPLCONF".into())),
                                     RESP::BulkString(Some("ACK".into())),
@@ -348,7 +351,7 @@ async fn handshake(
                                                 );
                                             }
                                         }
-                                        db.lock().await.insert(key.to_string(), entry);
+                                        db_guard.insert(key.to_string(), entry);
                                     }
                                 }
                             }
