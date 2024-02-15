@@ -21,9 +21,23 @@ impl<R: AsyncRead + Unpin> Connection<R> {
     }
 
     pub async fn skip_rdb(&mut self) -> anyhow::Result<usize> {
-        let mut empty_rdb = [0u8; 93];
-        let n = self.stream.read(&mut empty_rdb).await?;
-        Ok(n)
+        let data = &self.buffer[..];
+        println!(
+            "existed data: {:?}, length: {}",
+            String::from_utf8_lossy(data),
+            data.len()
+        );
+
+        let mut len = data.len();
+        if len > 93 {
+            self.buffer.advance(93);
+        }
+
+        while len < 93 {
+            let mut empty_rdb = Vec::with_capacity(93 - len);
+            len += self.stream.read_buf(&mut empty_rdb).await?;
+        }
+        Ok(len)
     }
 
     /// Read a single `Frame` value from the underlying stream.

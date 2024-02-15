@@ -316,6 +316,14 @@ async fn handshake(
                 if let RESP::Array(arr) = resp {
                     if let Some(RESP::BulkString(Some(cmd))) = arr.first() {
                         match cmd.to_lowercase().as_str() {
+                            "replconf" => {
+                                let resp = RESP::Array(vec![
+                                    RESP::BulkString(Some("REPLCONF".into())),
+                                    RESP::BulkString(Some("ACK".into())),
+                                    RESP::BulkString(Some("0".into())),
+                                ]);
+                                writer.write_all(resp.encode().as_bytes()).await.unwrap();
+                            }
                             "set" => {
                                 let key = arr.get(1).unwrap();
                                 let val = arr.get(2).unwrap();

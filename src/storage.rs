@@ -1,5 +1,4 @@
 use std::time::SystemTime;
-use tokio::sync::mpsc;
 
 pub(crate) struct Entry {
     pub(crate) val: String,
@@ -8,6 +7,8 @@ pub(crate) struct Entry {
 
 #[tokio::test]
 async fn test_channel() {
+    use tokio::sync::mpsc;
+
     let (tx, mut rx) = mpsc::channel(100);
 
     tokio::spawn(async move {
