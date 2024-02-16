@@ -144,7 +144,7 @@ async fn handle_connection(
 
                     "replconf" => Some(RESP::SimpleString("OK".into())),
 
-                    "wait" => Some(RESP::Integer(0)),
+                    "wait" => Some(RESP::Integer(replicas.lock().await.len() as i64)),
 
                     "psync" => Some(RESP::SimpleString(
                         "FULLRESYNC 8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb 0".into(),
