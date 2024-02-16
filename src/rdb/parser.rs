@@ -121,14 +121,12 @@ impl<R: AsyncRead + Unpin> Parser<R> {
         verify_magic(&mut self.input).await?;
         verify_version(&mut self.input).await?;
 
-        let mut last_database: u32 = 0;
-
         loop {
             let next_op = self.input.read_u8().await?;
 
             match next_op {
                 op_code::SELECTDB => {
-                    last_database = read_length(&mut self.input).await.unwrap();
+                    let last_database = read_length(&mut self.input).await.unwrap();
                     println!("database: {}", last_database);
                 }
                 op_code::EXPIRETIME_MS => {

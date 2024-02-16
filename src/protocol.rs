@@ -15,6 +15,8 @@ pub enum RESP {
     // Clients send commands to the Redis server as RESP arrays. Similarly, some Redis commands that
     // return collections of elements use arrays as their replies. An example is the LRANGE command that returns elements of a list.
     Array(Vec<RESP>),
+    // A CRLF-terminated string that represents a signed, base-10, 64-bit integer.
+    Integer(i64),
     // The null data type represents non-existent values.
     Null,
 }
@@ -48,6 +50,9 @@ impl RESP {
         match self {
             Self::SimpleString(s) => {
                 res.push_str(&format!("+{}\r\n", s));
+            }
+            Self::Integer(i) => {
+                res.push_str(&format!(":{}\r\n", i.to_string()));
             }
             Self::BulkString(s) => {
                 if s.is_none() {
@@ -106,6 +111,10 @@ impl<'a> Decoder<'a> {
                 self.pos += 1;
                 self.parse_simple_string()
             }
+            Some(':') => {
+                self.pos += 1;
+                self.parse_int()
+            }
             _ => {
                 println!("invalid cmd: <{:?}>", cmd);
                 unreachable!()
@@ -136,6 +145,27 @@ impl<'a> Decoder<'a> {
         })?;
 
         Ok(Some(RESP::Array(arr)))
+    }
+
+    fn parse_int(&mut self) -> Result<Option<RESP>, Error> {
+        if self.pos >= self.input.len() {
+            return Err(Error::Incomplete);
+        }
+
+        let cmd = &self.input[self.pos..];
+
+        let res = cmd.chars().take_while(|x| *x != '\r').collect::<String>();
+
+        self.pos += res.len();
+
+        if !&self.input[self.pos..].starts_with("\r\n") {
+            return Err(Error::Incomplete);
+        }
+        self.pos += 2;
+
+        Ok(Some(RESP::Integer(
+            res.parse().map_err(|_| Error::InvalidFormat)?,
+        )))
     }
 
     fn parse_simple_string(&mut self) -> Result<Option<RESP>, Error> {
@@ -200,6 +230,14 @@ mod tests {
     #[test]
     fn test_parse_string() {
         let testcases = vec![
+            Testcase {
+                cmd: ":0\r\n",
+                resp: Ok(RESP::Integer(0)),
+            },
+            Testcase {
+                cmd: ":-100\r\n",
+                resp: Ok(RESP::Integer(-100)),
+            },
             Testcase {
                 cmd: "+OK\r\n",
                 resp: Ok(RESP::SimpleString("OK".into())),

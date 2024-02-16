@@ -49,8 +49,6 @@ async fn handle_connection(
 
     let writer = Arc::new(Mutex::new(streams.1));
 
-    // FIXME: It's possible to get 10 bytes, then 1000 and then 14 bytes on the last read()
-    // There is no RESP message boundary. Need to decode in a loop till you get data all
     while let Ok(Some(resp)) = conn.read_frame().await {
         println!("recv command: {:?}", resp);
         if let RESP::Array(arr) = resp {
@@ -144,16 +142,9 @@ async fn handle_connection(
                         Some(RESP::Array(arr))
                     }
 
-                    "replconf" => {
-                        // let param = arr.get(1).unwrap();
-                        // if let RESP::BulkString(Some(param)) = param {
-                        //     if param == "listening-port" {
-                        //         let port = arr.get(2).unwrap();
-                        //         if let RESP::BulkString(Some(port)) = port {}
-                        //     }
-                        // }
-                        Some(RESP::SimpleString("OK".into()))
-                    }
+                    "replconf" => Some(RESP::SimpleString("OK".into())),
+
+                    "wait" => Some(RESP::Integer(0)),
 
                     "psync" => Some(RESP::SimpleString(
                         "FULLRESYNC 8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb 0".into(),
