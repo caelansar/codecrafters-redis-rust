@@ -30,6 +30,7 @@ impl<R: AsyncRead + Unpin> Connection<R> {
 
         let mut len = data.len();
         if len > 93 {
+            len = 93;
             self.buffer.advance(93);
         }
 

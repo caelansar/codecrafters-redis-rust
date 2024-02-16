@@ -120,7 +120,7 @@ impl<'a> Decoder<'a> {
         let cmd = &self.input[self.pos..];
 
         let res = cmd.chars().take_while(|x| *x != '\r').collect::<String>();
-        let item_count: usize = res.parse().map_err(|e| Error::InvalidFormat)?;
+        let item_count: usize = res.parse().map_err(|_| Error::InvalidFormat)?;
 
         self.pos += res.len();
         self.pos += 2;
@@ -166,7 +166,7 @@ impl<'a> Decoder<'a> {
         let cmd = &self.input[self.pos..];
 
         let res = cmd.chars().take_while(|x| *x != '\r').collect::<String>();
-        let len: usize = res.parse().map_err(|e| Error::InvalidFormat)?;
+        let len: usize = res.parse().map_err(|_| Error::InvalidFormat)?;
 
         self.pos += res.len();
         if !&self.input[self.pos..].starts_with("\r\n") {
