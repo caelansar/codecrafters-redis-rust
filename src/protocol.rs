@@ -27,6 +27,8 @@ pub enum Error {
     Incomplete,
     #[error("Invalid frame format")]
     InvalidFormat,
+    #[error("{0}")]
+    Other(String),
 }
 
 impl FromStr for RESP {

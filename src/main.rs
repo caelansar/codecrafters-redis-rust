@@ -1,4 +1,6 @@
+mod cmd;
 mod connection;
+mod parse;
 mod protocol;
 mod rdb;
 mod storage;
