@@ -54,7 +54,7 @@ impl RESP {
                 res.push_str(&format!("+{}\r\n", s));
             }
             Self::Integer(i) => {
-                res.push_str(&format!(":{}\r\n", i.to_string()));
+                res.push_str(&format!(":{}\r\n", i));
             }
             Self::BulkString(s) => {
                 if s.is_none() {
