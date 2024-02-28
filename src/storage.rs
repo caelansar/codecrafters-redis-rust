@@ -13,7 +13,7 @@ async fn test_channel() {
 
     tokio::spawn(async move {
         for i in 0..50 {
-            if let Err(_) = tx.send(i).await {
+            if tx.send(i).await.is_err() {
                 println!("receiver dropped");
                 return;
             }
