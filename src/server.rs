@@ -63,7 +63,7 @@ async fn handle_connection(
                         if let RESP::BulkString(Some(key)) = key {
                             match db.lock().await.get(key) {
                                 Some(e) => {
-                                    if e.exp.is_none() || e.exp.unwrap() > SystemTime::now() {
+                                    if e.exp.is_some_and(|exp| exp > SystemTime::now()) {
                                         Some(RESP::BulkString(Some(e.val.clone())))
                                     } else {
                                         Some(RESP::BulkString(None))
