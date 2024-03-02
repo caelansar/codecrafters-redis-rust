@@ -1,4 +1,5 @@
 use crate::parse::{Parse, ParseError};
+use crate::protocol::RESP;
 use anyhow::anyhow;
 use bytes::Bytes;
 use std::time::Duration;
@@ -118,5 +119,26 @@ impl Set {
         }
 
         Ok(Set { key, value, expire })
+    }
+
+    /// Converts the command into an equivalent `Frame`.
+    ///
+    /// This is called by the client when encoding a `Set` command to send to
+    /// the server.
+    pub(crate) fn into_frame(self) -> RESP {
+        let mut resp = vec![];
+        resp.push(RESP::BulkString(Some("set".to_string())));
+        resp.push(RESP::BulkString(Some(self.key.to_string())));
+        resp.push(RESP::BulkString(Some(
+            String::from_utf8_lossy(&self.value).to_string(),
+        )));
+        if let Some(ms) = self.expire {
+            // Expirations in Redis protocol can be specified in two ways
+            // 1. SET key value EX seconds
+            // 2. SET key value PX milliseconds
+            resp.push(RESP::BulkString(Some("px".to_string())));
+            resp.push(RESP::BulkString(Some(ms.as_millis().to_string())));
+        }
+        RESP::Array(resp)
     }
 }

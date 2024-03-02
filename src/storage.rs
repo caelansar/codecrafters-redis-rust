@@ -1,5 +1,6 @@
 use std::time::SystemTime;
 
+#[derive(Debug)]
 pub(crate) struct Entry {
     pub(crate) val: String,
     pub(crate) exp: Option<SystemTime>,

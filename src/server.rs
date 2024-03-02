@@ -1,3 +1,4 @@
+use crate::cmd::Command;
 use crate::connection::Connection;
 use crate::protocol::RESP;
 use crate::rdb::consts;
@@ -21,7 +22,7 @@ use tokio::sync::mpsc::Sender;
 use tokio::sync::{mpsc, Mutex};
 use tokio::time::Instant;
 
-fn decode_hex(s: &str) -> Result<Vec<u8>, ParseIntError> {
+pub fn decode_hex(s: &str) -> Result<Vec<u8>, ParseIntError> {
     (0..s.len())
         .step_by(2)
         .map(|i| u8::from_str_radix(&s[i..i + 2], 16))
@@ -49,219 +50,56 @@ async fn handle_connection(
 
     while let Ok(Some(resp)) = conn.read_frame().await {
         println!("recv command: {:?}", resp);
-        if let RESP::Array(arr) = resp {
-            if let Some(RESP::BulkString(Some(cmd))) = arr.first() {
-                let resp = match cmd.to_lowercase().as_str() {
-                    "echo" => arr.get(1).cloned(),
-                    "get" => {
-                        let key = arr.get(1).unwrap();
 
-                        // TODO: remove
-                        // block command to let it propagate to replicas
-                        tokio::time::sleep(Duration::from_millis(20)).await;
+        let cmd = Command::from_resp_frame(resp).unwrap();
+        match cmd {
+            Command::Get(get) => {
+                // TODO: remove
+                // block command to let it propagate to replicas
+                tokio::time::sleep(Duration::from_millis(20)).await;
 
-                        if let RESP::BulkString(Some(key)) = key {
-                            match db.lock().await.get(key) {
-                                Some(e) => {
-                                    if e.exp.is_some_and(|exp| exp > SystemTime::now()) {
-                                        Some(RESP::BulkString(Some(e.val.clone())))
-                                    } else {
-                                        Some(RESP::BulkString(None))
-                                    }
-                                }
-                                None => Some(RESP::BulkString(None)),
-                            }
-                        } else {
-                            unreachable!()
+                let resp = match db.lock().await.get(get.key()) {
+                    Some(e) => match e.exp {
+                        None => Some(RESP::BulkString(Some(e.val.clone()))),
+                        Some(exp) if exp > SystemTime::now() => {
+                            Some(RESP::BulkString(Some(e.val.clone())))
                         }
-                    }
-                    "set" => {
-                        let key = arr.get(1).unwrap();
-                        let val = arr.get(2).unwrap();
-
-                        let px = arr.get(3);
-
-                        // master node, propagate SET command
-                        if replica_opt.is_none() {
-                            let data = RESP::Array(arr.clone());
-
-                            master_offset.fetch_add(data.encode().len(), Ordering::Relaxed);
-
-                            tx.send(data).await.unwrap();
-                        }
-
-                        if let RESP::BulkString(Some(key)) = key {
-                            if let RESP::BulkString(Some(val)) = val {
-                                let mut entry = Entry {
-                                    val: val.to_string(),
-                                    exp: None,
-                                };
-                                if px
-                                    .is_some_and(|x| *x == RESP::BulkString(Some("px".to_string())))
-                                {
-                                    let exp = arr.get(4).unwrap();
-                                    if let RESP::BulkString(Some(e)) = exp {
-                                        let exp: u64 = e.parse().unwrap();
-                                        entry.exp =
-                                            Some(SystemTime::now().add(Duration::from_millis(exp)));
-                                    }
-                                }
-                                db.lock().await.insert(key.to_string(), entry);
-                            }
-                        }
-
-                        Some(RESP::SimpleString("OK".into()))
-                    }
-
-                    "config" => {
-                        let conf_name = arr.get(2).unwrap();
-                        match conf_name {
-                            RESP::BulkString(Some(x)) => {
-                                if x == "dir" {
-                                    Some(RESP::Array(vec![
-                                        RESP::BulkString(Some(x.clone())),
-                                        RESP::BulkString(dir.as_ref().clone()),
-                                    ]))
-                                } else if x == "dbfilename" {
-                                    let db_filename = db_filename.clone();
-                                    Some(RESP::Array(vec![
-                                        RESP::BulkString(Some(x.clone())),
-                                        RESP::BulkString(db_filename.as_ref().clone()),
-                                    ]))
-                                } else {
-                                    unreachable!();
-                                }
-                            }
-                            _ => unreachable!(),
-                        }
-                    }
-
-                    "keys" => {
-                        let arr = db
-                            .lock()
-                            .await
-                            .keys()
-                            .map(|x| RESP::BulkString(Some(x.clone())))
-                            .collect::<Vec<RESP>>();
-
-                        Some(RESP::Array(arr))
-                    }
-
-                    "replconf" => {
-                        let param = arr.get(1).unwrap();
-                        if let RESP::BulkString(Some(s)) = param {
-                            // return from replicas
-                            if s.to_lowercase() == "ack" {
-                                let offset = arr.get(2).unwrap();
-                                if let RESP::BulkString(Some(offset)) = offset {
-                                    let offset: usize = offset.parse().unwrap();
-                                    let master_offset = master_offset.load(Ordering::Relaxed);
-                                    println!(
-                                        "getack offset: {}, master offset: {}",
-                                        offset, master_offset
-                                    );
-
-                                    if offset > master_offset {
-                                        ack.fetch_add(1, Ordering::Relaxed);
-                                    }
-                                }
-                                None
-                            } else {
-                                Some(RESP::SimpleString("OK".into()))
-                            }
-                        } else {
-                            unreachable!()
-                        }
-                    }
-
-                    "wait" => {
-                        if replica_opt.is_none() {
-                            let start = Instant::now();
-
-                            let number = arr
-                                .get(1)
-                                .and_then(|x| {
-                                    if let RESP::BulkString(Some(s)) = x {
-                                        s.parse::<usize>().ok()
-                                    } else {
-                                        None
-                                    }
-                                })
-                                .unwrap();
-                            let timeout = arr
-                                .get(2)
-                                .and_then(|x| {
-                                    if let RESP::BulkString(Some(s)) = x {
-                                        s.parse::<u64>().ok()
-                                    } else {
-                                        None
-                                    }
-                                })
-                                .unwrap();
-
-                            let master_offset = master_offset.load(Ordering::Relaxed);
-                            println!(
-                                "wait, number: {}, timeout: {}, master offset: {}",
-                                number, timeout, master_offset
-                            );
-
-                            let mut reply = ack.load(Ordering::Relaxed);
-
-                            if master_offset == 0 {
-                                reply = replicas.lock().await.len();
-                            } else {
-                                for replica in replicas.lock().await.iter() {
-                                    println!("send REPLCONF GETACK");
-                                    let resp = RESP::Array(vec![
-                                        RESP::BulkString(Some("REPLCONF".into())),
-                                        RESP::BulkString(Some("GETACK".into())),
-                                        RESP::BulkString(Some("*".into())),
-                                    ]);
-                                    replica
-                                        .lock()
-                                        .await
-                                        .write_all(resp.encode().as_bytes())
-                                        .await
-                                        .unwrap();
-                                }
-
-                                let elapse = start.elapsed();
-
-                                if reply < number {
-                                    println!("wait timeout");
-                                    tokio::time::sleep(Duration::from_millis(timeout).sub(elapse))
-                                        .await;
-                                    // fetch again
-                                    reply = ack.load(Ordering::Relaxed);
-                                }
-
-                                // reset to zero
-                                ack.store(0, Ordering::Relaxed);
-                            }
-
-                            println!("get reply: {}, wait number: {}", reply, number);
-                            Some(RESP::Integer(reply.min(number) as i64))
-                        } else {
-                            None
-                        }
-                    }
-
-                    "psync" => Some(RESP::SimpleString(
-                        "FULLRESYNC 8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb 0".into(),
-                    )),
-
-                    "info" => {
-                        if replica_opt.is_none() {
-                            Some(RESP::BulkString(Some("role:master\nmaster_replid:8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb\nmaster_repl_offset:0".into())))
-                        } else {
-                            Some(RESP::BulkString(Some("role:slave".into())))
-                        }
-                    }
-
-                    "ping" => Some(RESP::SimpleString("PONG".into())),
-
-                    _ => unimplemented!(),
+                        _ => Some(RESP::BulkString(None)),
+                    },
+                    None => Some(RESP::BulkString(None)),
                 };
+                if let Some(resp) = resp {
+                    writer
+                        .lock()
+                        .await
+                        .write_all(resp.encode().as_bytes())
+                        .await
+                        .unwrap();
+                }
+            }
+            Command::Set(set) => {
+                // master node, propagate SET command
+                let key = set.key().to_string();
+                let val = String::from_utf8_lossy(set.value()).to_string();
+                let expire = set.expire();
+
+                if replica_opt.is_none() {
+                    let data = set.into_frame();
+
+                    master_offset.fetch_add(data.encode().len(), Ordering::Relaxed);
+
+                    tx.send(data).await.unwrap();
+                }
+
+                let mut entry = Entry { val, exp: None };
+
+                if expire.is_some() {
+                    entry.exp = Some(SystemTime::now().add(expire.unwrap()));
+                }
+
+                db.lock().await.insert(key, entry);
+
+                let resp = Some(RESP::SimpleString("OK".into()));
 
                 if let Some(resp) = resp {
                     writer
@@ -271,19 +109,188 @@ async fn handle_connection(
                         .await
                         .unwrap();
                 }
+            }
+            Command::Raw(resp) => {
+                if let RESP::Array(arr) = resp {
+                    if let Some(RESP::BulkString(Some(cmd))) = arr.first() {
+                        let resp = match cmd.to_lowercase().as_str() {
+                            "echo" => arr.get(1).cloned(),
+                            "config" => {
+                                let conf_name = arr.get(2).unwrap();
+                                match conf_name {
+                                    RESP::BulkString(Some(x)) => {
+                                        if x == "dir" {
+                                            Some(RESP::Array(vec![
+                                                RESP::BulkString(Some(x.clone())),
+                                                RESP::BulkString(dir.as_ref().clone()),
+                                            ]))
+                                        } else if x == "dbfilename" {
+                                            let db_filename = db_filename.clone();
+                                            Some(RESP::Array(vec![
+                                                RESP::BulkString(Some(x.clone())),
+                                                RESP::BulkString(db_filename.as_ref().clone()),
+                                            ]))
+                                        } else {
+                                            unreachable!();
+                                        }
+                                    }
+                                    _ => unreachable!(),
+                                }
+                            }
 
-                if cmd.to_lowercase() == "psync" {
-                    println!("send rdb");
-                    let binary_rdb = decode_hex(consts::EMPTY_RDB).unwrap();
-                    let mut data = format!("${}\r\n", binary_rdb.len()).into_bytes();
-                    data.extend(binary_rdb);
-                    writer.lock().await.write_all(&data).await.unwrap();
+                            "keys" => {
+                                let arr = db
+                                    .lock()
+                                    .await
+                                    .keys()
+                                    .map(|x| RESP::BulkString(Some(x.clone())))
+                                    .collect::<Vec<RESP>>();
 
-                    replicas.lock().await.push(writer.clone());
-                    println!("push replicas")
+                                Some(RESP::Array(arr))
+                            }
+
+                            "replconf" => {
+                                let param = arr.get(1).unwrap();
+                                if let RESP::BulkString(Some(s)) = param {
+                                    // return from replicas
+                                    if s.to_lowercase() == "ack" {
+                                        let offset = arr.get(2).unwrap();
+                                        if let RESP::BulkString(Some(offset)) = offset {
+                                            let offset: usize = offset.parse().unwrap();
+                                            let master_offset =
+                                                master_offset.load(Ordering::Relaxed);
+                                            println!(
+                                                "getack offset: {}, master offset: {}",
+                                                offset, master_offset
+                                            );
+
+                                            if offset > master_offset {
+                                                ack.fetch_add(1, Ordering::Relaxed);
+                                            }
+                                        }
+                                        None
+                                    } else {
+                                        Some(RESP::SimpleString("OK".into()))
+                                    }
+                                } else {
+                                    unreachable!()
+                                }
+                            }
+
+                            "wait" => {
+                                if replica_opt.is_none() {
+                                    let start = Instant::now();
+
+                                    let number = arr
+                                        .get(1)
+                                        .and_then(|x| {
+                                            if let RESP::BulkString(Some(s)) = x {
+                                                s.parse::<usize>().ok()
+                                            } else {
+                                                None
+                                            }
+                                        })
+                                        .unwrap();
+                                    let timeout = arr
+                                        .get(2)
+                                        .and_then(|x| {
+                                            if let RESP::BulkString(Some(s)) = x {
+                                                s.parse::<u64>().ok()
+                                            } else {
+                                                None
+                                            }
+                                        })
+                                        .unwrap();
+
+                                    let master_offset = master_offset.load(Ordering::Relaxed);
+                                    println!(
+                                        "wait, number: {}, timeout: {}, master offset: {}",
+                                        number, timeout, master_offset
+                                    );
+
+                                    let mut reply = ack.load(Ordering::Relaxed);
+
+                                    if master_offset == 0 {
+                                        reply = replicas.lock().await.len();
+                                    } else {
+                                        for replica in replicas.lock().await.iter() {
+                                            println!("send REPLCONF GETACK");
+                                            let resp = RESP::Array(vec![
+                                                RESP::BulkString(Some("REPLCONF".into())),
+                                                RESP::BulkString(Some("GETACK".into())),
+                                                RESP::BulkString(Some("*".into())),
+                                            ]);
+                                            replica
+                                                .lock()
+                                                .await
+                                                .write_all(resp.encode().as_bytes())
+                                                .await
+                                                .unwrap();
+                                        }
+
+                                        let elapse = start.elapsed();
+
+                                        if reply < number {
+                                            println!("wait timeout");
+                                            tokio::time::sleep(
+                                                Duration::from_millis(timeout).sub(elapse),
+                                            )
+                                            .await;
+                                            // fetch again
+                                            reply = ack.load(Ordering::Relaxed);
+                                        }
+
+                                        // reset to zero
+                                        ack.store(0, Ordering::Relaxed);
+                                    }
+
+                                    println!("get reply: {}, wait number: {}", reply, number);
+                                    Some(RESP::Integer(reply.min(number) as i64))
+                                } else {
+                                    None
+                                }
+                            }
+
+                            "psync" => Some(RESP::SimpleString(
+                                "FULLRESYNC 8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb 0".into(),
+                            )),
+
+                            "info" => {
+                                if replica_opt.is_none() {
+                                    Some(RESP::BulkString(Some("role:master\nmaster_replid:8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb\nmaster_repl_offset:0".into())))
+                                } else {
+                                    Some(RESP::BulkString(Some("role:slave".into())))
+                                }
+                            }
+
+                            "ping" => Some(RESP::SimpleString("PONG".into())),
+
+                            _ => unimplemented!(),
+                        };
+
+                        if let Some(resp) = resp {
+                            writer
+                                .lock()
+                                .await
+                                .write_all(resp.encode().as_bytes())
+                                .await
+                                .unwrap();
+                        }
+
+                        if cmd.to_lowercase() == "psync" {
+                            println!("send rdb");
+                            let binary_rdb = decode_hex(consts::EMPTY_RDB).unwrap();
+                            let mut data = format!("${}\r\n", binary_rdb.len()).into_bytes();
+                            data.extend(binary_rdb);
+                            writer.lock().await.write_all(&data).await.unwrap();
+
+                            replicas.lock().await.push(writer.clone());
+                            println!("push replicas")
+                        }
+                    } else {
+                        unreachable!()
+                    }
                 }
-            } else {
-                unreachable!()
             }
         }
     }

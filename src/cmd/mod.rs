@@ -87,6 +87,10 @@ mod tests {
             let cmd = Command::from_resp_frame(testcase.resp).unwrap();
 
             assert_eq!(cmd, testcase.cmd);
+
+            if let Command::Set(set) = cmd {
+                println!("{:?}", set.into_frame());
+            }
         });
     }
 }

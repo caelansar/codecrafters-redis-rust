@@ -95,8 +95,8 @@ impl<R: AsyncRead + Unpin> Connection<R> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::decode_hex;
     use crate::rdb::consts;
+    use crate::server::decode_hex;
     use tokio::io::BufReader;
 
     #[tokio::test]
