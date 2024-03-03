@@ -3,13 +3,13 @@ use crate::connection::Connection;
 use crate::protocol::RESP;
 use crate::rdb::consts;
 use crate::rdb::parser::Parser;
-use crate::storage::Entry;
+use crate::storage::Db;
 use anyhow::Context;
-use std::collections::HashMap;
+use bytes::Bytes;
 use std::io;
 use std::net::SocketAddr;
 use std::num::ParseIntError;
-use std::ops::{Add, Sub};
+use std::ops::Sub;
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -32,7 +32,7 @@ pub fn decode_hex(s: &str) -> Result<Vec<u8>, ParseIntError> {
 async fn handle_connection(
     streams: (OwnedReadHalf, OwnedWriteHalf),
     addr: SocketAddr,
-    db: Arc<Mutex<HashMap<String, Entry>>>,
+    db: Db,
     dir: Arc<Option<String>>,
     db_filename: Arc<Option<String>>,
     replica_opt: Arc<Option<(Option<String>, Option<u16>)>>,
@@ -58,14 +58,10 @@ async fn handle_connection(
                 // block command to let it propagate to replicas
                 tokio::time::sleep(Duration::from_millis(20)).await;
 
-                let resp = match db.lock().await.get(get.key()) {
-                    Some(e) => match e.exp {
-                        None => Some(RESP::BulkString(Some(e.val.clone()))),
-                        Some(exp) if exp > SystemTime::now() => {
-                            Some(RESP::BulkString(Some(e.val.clone())))
-                        }
-                        _ => Some(RESP::BulkString(None)),
-                    },
+                let resp = match db.get(get.key()) {
+                    Some(e) => Some(RESP::BulkString(Some(
+                        String::from_utf8_lossy(&e).to_string(),
+                    ))),
                     None => Some(RESP::BulkString(None)),
                 };
                 if let Some(resp) = resp {
@@ -91,13 +87,7 @@ async fn handle_connection(
                     tx.send(data).await.unwrap();
                 }
 
-                let mut entry = Entry { val, exp: None };
-
-                if expire.is_some() {
-                    entry.exp = Some(SystemTime::now().add(expire.unwrap()));
-                }
-
-                db.lock().await.insert(key, entry);
+                db.set(key, Bytes::from(val), expire);
 
                 let resp = Some(RESP::SimpleString("OK".into()));
 
@@ -139,12 +129,7 @@ async fn handle_connection(
                             }
 
                             "keys" => {
-                                let arr = db
-                                    .lock()
-                                    .await
-                                    .keys()
-                                    .map(|x| RESP::BulkString(Some(x.clone())))
-                                    .collect::<Vec<RESP>>();
+                                let arr = db.keys();
 
                                 Some(RESP::Array(arr))
                             }
@@ -312,7 +297,7 @@ pub async fn run_server(
     );
 
     let db = init_db(&dir, &db_filename).await;
-    let db = Arc::new(Mutex::new(db));
+    // let db = Arc::new(Mutex::new(db));
 
     let dir = Arc::new(dir);
     let db_filename = Arc::new(db_filename);
@@ -379,14 +364,16 @@ pub async fn run_server(
     }
 }
 
-async fn init_db(dir: &Option<String>, db_filename: &Option<String>) -> HashMap<String, Entry> {
+async fn init_db(dir: &Option<String>, db_filename: &Option<String>) -> Db {
+    let db = Db::new();
+
     if let (Some(dir), Some(db_filename)) = (dir, db_filename) {
         let file = File::open(&Path::new(dir).join(db_filename)).await;
 
         match file {
             Err(ref e) if e.kind() == io::ErrorKind::NotFound => {
                 println!("{}/{} not found", dir, db_filename);
-                HashMap::new()
+                db
             }
             Err(e) => panic!("failed to read rdb file: {}", &e),
             Ok(_) => {
@@ -396,43 +383,31 @@ async fn init_db(dir: &Option<String>, db_filename: &Option<String>) -> HashMap<
                 let mut parser = Parser::new(reader);
                 parser.parse().await.unwrap();
 
-                parser
-                    .get_kv_pairs()
-                    .filter_map(|(k, (v, exp))| {
-                        if let &RESP::BulkString(Some(ref x)) = v {
-                            match exp {
-                                Some(exp) if *exp > SystemTime::now() => Some((
-                                    k.clone(),
-                                    Entry {
-                                        val: x.clone(),
-                                        exp: Some(*exp),
-                                    },
-                                )),
-                                Some(_) => None, // expired
-                                None => Some((
-                                    k.clone(),
-                                    Entry {
-                                        val: x.clone(),
-                                        exp: None,
-                                    },
-                                )),
-                            }
-                        } else {
-                            None
+                parser.get_kv_pairs().for_each(|(k, (v, exp))| {
+                    if let &RESP::BulkString(Some(ref x)) = v {
+                        match exp {
+                            Some(exp) if *exp > SystemTime::now() => db.set(
+                                k.clone(),
+                                Bytes::from(x.clone()),
+                                exp.duration_since(SystemTime::now()).ok(),
+                            ),
+                            Some(_) => {} // expired
+                            None => db.set(k.clone(), Bytes::from(x.clone()), None),
                         }
-                    })
-                    .collect()
+                    }
+                });
+                db
             }
         }
     } else {
-        HashMap::new()
+        db
     }
 }
 
 async fn handshake(
     listening_port: u16,
     replica_opt: Arc<Option<(Option<String>, Option<u16>)>>,
-    db: Arc<Mutex<HashMap<String, Entry>>>,
+    db: Db,
 ) -> anyhow::Result<()> {
     if let Some((Some(host), Some(port))) = replica_opt.as_ref() {
         let stream = TcpStream::connect(format!("{}:{}", host, port)).await?;
@@ -494,14 +469,11 @@ async fn handshake(
             println!("handle propagated commands from master");
             let mut offset: usize = 0;
             while let Ok(Some(resp)) = conn.read_frame().await {
-                let mut db_guard = db.lock().await;
                 println!("replica receive command from master: {:?}", resp);
                 if let RESP::Array(ref arr) = resp {
                     if let Some(RESP::BulkString(Some(cmd))) = arr.first() {
                         match cmd.to_lowercase().as_str() {
                             "replconf" => {
-                                drop(db_guard);
-
                                 let resp = RESP::Array(vec![
                                     RESP::BulkString(Some("REPLCONF".into())),
                                     RESP::BulkString(Some("ACK".into())),
@@ -512,9 +484,7 @@ async fn handshake(
                                 println!("response: {:?}", data);
                                 writer.write_all(data.as_bytes()).await.unwrap();
                             }
-                            "ping" => {
-                                drop(db_guard);
-                            }
+                            "ping" => {}
                             "set" => {
                                 let key = arr.get(1).unwrap();
                                 let val = arr.get(2).unwrap();
@@ -523,23 +493,17 @@ async fn handshake(
 
                                 if let RESP::BulkString(Some(key)) = key {
                                     if let RESP::BulkString(Some(val)) = val {
-                                        let mut entry = Entry {
-                                            val: val.to_string(),
-                                            exp: None,
-                                        };
+                                        let mut exp = None;
                                         if px.is_some_and(|x| {
                                             *x == RESP::BulkString(Some("px".to_string()))
                                         }) {
-                                            let exp = arr.get(4).unwrap();
-                                            if let RESP::BulkString(Some(e)) = exp {
-                                                let exp: u64 = e.parse().unwrap();
-                                                entry.exp = Some(
-                                                    SystemTime::now()
-                                                        .add(Duration::from_millis(exp)),
-                                                );
+                                            let exp_data = arr.get(4).unwrap();
+                                            if let RESP::BulkString(Some(e)) = exp_data {
+                                                let u64_exp: u64 = e.parse().unwrap();
+                                                exp = Some(Duration::from_millis(u64_exp));
                                             }
                                         }
-                                        db_guard.insert(key.to_string(), entry);
+                                        db.set(key.to_string(), Bytes::from(val.to_string()), exp);
                                     }
                                 }
                             }
