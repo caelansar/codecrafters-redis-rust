@@ -1,6 +1,8 @@
+mod echo;
 mod get;
 mod set;
 
+use crate::cmd::echo::Echo;
 use crate::cmd::get::Get;
 use crate::cmd::set::Set;
 use crate::parse::Parse;
@@ -10,6 +12,7 @@ use crate::protocol::RESP;
 pub enum Command {
     Get(Get),
     Set(Set),
+    Echo(Echo),
     Raw(RESP),
 }
 
@@ -22,6 +25,7 @@ impl Command {
         let command = match name.as_str() {
             "get" => Command::Get(Get::parse_frames(&mut parse)?),
             "set" => Command::Set(Set::parse_frames(&mut parse)?),
+            "echo" => Command::Echo(Echo::parse_frames(&mut parse)?),
             _ => Command::Raw(resp),
         };
 

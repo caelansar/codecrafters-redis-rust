@@ -42,6 +42,11 @@ async fn key_value_get_set() {
         .await
         .unwrap();
 
+    stream
+        .write_all(b"*2\r\n$4\r\nECHO\r\n$5\r\nhello\r\n")
+        .await
+        .unwrap();
+
     // Shutdown the write half
     stream.shutdown().await.unwrap();
 
@@ -49,6 +54,11 @@ async fn key_value_get_set() {
     let mut response = [0; 11];
     stream.read_exact(&mut response).await.unwrap();
     assert_eq!(b"$5\r\nworld\r\n", &response);
+
+    // Read "hello" response
+    let mut response = [0; 11];
+    stream.read_exact(&mut response).await.unwrap();
+    assert_eq!(b"$5\r\nhello\r\n", &response);
 
     // Receive `None`
     assert_eq!(0, stream.read(&mut response).await.unwrap());

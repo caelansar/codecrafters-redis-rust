@@ -53,6 +53,15 @@ async fn handle_connection(
 
         let cmd = Command::from_resp_frame(resp).unwrap();
         match cmd {
+            Command::Echo(echo) => {
+                let resp = RESP::BulkString(Some(echo.message().to_string()));
+                writer
+                    .lock()
+                    .await
+                    .write_all(resp.encode().as_bytes())
+                    .await
+                    .unwrap();
+            }
             Command::Get(get) => {
                 // TODO: remove
                 // block command to let it propagate to replicas
@@ -104,7 +113,6 @@ async fn handle_connection(
                 if let RESP::Array(arr) = resp {
                     if let Some(RESP::BulkString(Some(cmd))) = arr.first() {
                         let resp = match cmd.to_lowercase().as_str() {
-                            "echo" => arr.get(1).cloned(),
                             "config" => {
                                 let conf_name = arr.get(2).unwrap();
                                 match conf_name {
