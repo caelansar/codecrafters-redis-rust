@@ -62,6 +62,16 @@ async fn handle_connection(
                     .await
                     .unwrap();
             }
+            Command::Ping(_) => {
+                println!("pong");
+                let resp = RESP::SimpleString("PONG".into());
+                writer
+                    .lock()
+                    .await
+                    .write_all(resp.encode().as_bytes())
+                    .await
+                    .unwrap();
+            }
             Command::Get(get) => {
                 // TODO: remove
                 // block command to let it propagate to replicas
@@ -255,8 +265,6 @@ async fn handle_connection(
                                     Some(RESP::BulkString(Some("role:slave".into())))
                                 }
                             }
-
-                            "ping" => Some(RESP::SimpleString("PONG".into())),
 
                             _ => unimplemented!(),
                         };
