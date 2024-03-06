@@ -370,4 +370,13 @@ async fn test_db() {
     );
     time::sleep(Duration::from_millis(1010)).await;
     assert_eq!(None, db.get("k"));
+
+    let mut recv = db.subscribe("k".to_string());
+
+    tokio::spawn(async move {
+        let n = db.publish("k", Bytes::from("v"));
+        assert_eq!(1, n);
+    });
+
+    assert_eq!(Ok(Bytes::from("v")), recv.recv().await);
 }
