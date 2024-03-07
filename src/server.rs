@@ -62,6 +62,19 @@ async fn handle_connection(
                     .await
                     .unwrap();
             }
+            Command::Keys(keys) => {
+                // TODO: get keys by pattern
+                let _ = keys;
+
+                let resp = RESP::Array(db.keys());
+
+                writer
+                    .lock()
+                    .await
+                    .write_all(resp.encode().as_bytes())
+                    .await
+                    .unwrap();
+            }
             Command::Ping(_) => {
                 println!("pong");
                 let resp = RESP::SimpleString("PONG".into());
@@ -144,12 +157,6 @@ async fn handle_connection(
                                     }
                                     _ => unreachable!(),
                                 }
-                            }
-
-                            "keys" => {
-                                let arr = db.keys();
-
-                                Some(RESP::Array(arr))
                             }
 
                             "replconf" => {
