@@ -75,9 +75,9 @@ async fn handle_connection(
                     .await
                     .unwrap();
             }
-            Command::Ping(_) => {
-                println!("pong");
-                let resp = RESP::SimpleString("PONG".into());
+            Command::Ping(ping) => {
+                let resp = RESP::SimpleString(ping.message().map_or("PONG".into(), |x| x.clone()));
+
                 writer
                     .lock()
                     .await
