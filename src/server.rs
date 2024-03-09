@@ -54,7 +54,7 @@ async fn handle_connection(
         let cmd = Command::from_resp_frame(resp).unwrap();
         match cmd {
             Command::Echo(echo) => {
-                let resp = RESP::BulkString(Some(echo.message().to_string()));
+                let resp = RESP::BulkString(echo.message());
                 writer
                     .lock()
                     .await
@@ -91,10 +91,8 @@ async fn handle_connection(
                 tokio::time::sleep(Duration::from_millis(20)).await;
 
                 let resp = match db.get(get.key()) {
-                    Some(e) => Some(RESP::BulkString(Some(
-                        String::from_utf8_lossy(&e).to_string(),
-                    ))),
-                    None => Some(RESP::BulkString(None)),
+                    Some(e) => Some(RESP::BulkString(e)),
+                    None => Some(RESP::Null),
                 };
                 if let Some(resp) = resp {
                     writer
@@ -134,22 +132,27 @@ async fn handle_connection(
             }
             Command::Raw(resp) => {
                 if let RESP::Array(arr) = resp {
-                    if let Some(RESP::BulkString(Some(cmd))) = arr.first() {
+                    if let Some(RESP::BulkString(cmd)) = arr.first() {
+                        let cmd = String::from_utf8_lossy(cmd);
                         let resp = match cmd.to_lowercase().as_str() {
                             "config" => {
                                 let conf_name = arr.get(2).unwrap();
                                 match conf_name {
-                                    RESP::BulkString(Some(x)) => {
+                                    RESP::BulkString(x) => {
                                         if x == "dir" {
                                             Some(RESP::Array(vec![
-                                                RESP::BulkString(Some(x.clone())),
-                                                RESP::BulkString(dir.as_ref().clone()),
+                                                RESP::BulkString(x.clone()),
+                                                RESP::BulkString(Bytes::from(
+                                                    dir.as_ref().clone().unwrap(),
+                                                )),
                                             ]))
                                         } else if x == "dbfilename" {
                                             let db_filename = db_filename.clone();
                                             Some(RESP::Array(vec![
-                                                RESP::BulkString(Some(x.clone())),
-                                                RESP::BulkString(db_filename.as_ref().clone()),
+                                                RESP::BulkString(x.clone()),
+                                                RESP::BulkString(Bytes::from(
+                                                    db_filename.as_ref().clone().unwrap(),
+                                                )),
                                             ]))
                                         } else {
                                             unreachable!();
@@ -161,12 +164,13 @@ async fn handle_connection(
 
                             "replconf" => {
                                 let param = arr.get(1).unwrap();
-                                if let RESP::BulkString(Some(s)) = param {
+                                if let RESP::BulkString(s) = param {
                                     // return from replicas
-                                    if s.to_lowercase() == "ack" {
+                                    if String::from_utf8_lossy(s).to_lowercase() == "ack" {
                                         let offset = arr.get(2).unwrap();
-                                        if let RESP::BulkString(Some(offset)) = offset {
-                                            let offset: usize = offset.parse().unwrap();
+                                        if let RESP::BulkString(offset) = offset {
+                                            let offset: usize =
+                                                String::from_utf8_lossy(offset).parse().unwrap();
                                             let master_offset =
                                                 master_offset.load(Ordering::Relaxed);
                                             println!(
@@ -194,8 +198,8 @@ async fn handle_connection(
                                     let number = arr
                                         .get(1)
                                         .and_then(|x| {
-                                            if let RESP::BulkString(Some(s)) = x {
-                                                s.parse::<usize>().ok()
+                                            if let RESP::BulkString(s) = x {
+                                                String::from_utf8_lossy(s).parse::<usize>().ok()
                                             } else {
                                                 None
                                             }
@@ -204,8 +208,8 @@ async fn handle_connection(
                                     let timeout = arr
                                         .get(2)
                                         .and_then(|x| {
-                                            if let RESP::BulkString(Some(s)) = x {
-                                                s.parse::<u64>().ok()
+                                            if let RESP::BulkString(s) = x {
+                                                String::from_utf8_lossy(s).parse::<u64>().ok()
                                             } else {
                                                 None
                                             }
@@ -226,9 +230,9 @@ async fn handle_connection(
                                         for replica in replicas.lock().await.iter() {
                                             println!("send REPLCONF GETACK");
                                             let resp = RESP::Array(vec![
-                                                RESP::BulkString(Some("REPLCONF".into())),
-                                                RESP::BulkString(Some("GETACK".into())),
-                                                RESP::BulkString(Some("*".into())),
+                                                RESP::BulkString(Bytes::from("REPLCONF")),
+                                                RESP::BulkString(Bytes::from("GETACK")),
+                                                RESP::BulkString(Bytes::from("*")),
                                             ]);
                                             replica
                                                 .lock()
@@ -267,9 +271,9 @@ async fn handle_connection(
 
                             "info" => {
                                 if replica_opt.is_none() {
-                                    Some(RESP::BulkString(Some("role:master\nmaster_replid:8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb\nmaster_repl_offset:0".into())))
+                                    Some(RESP::BulkString(Bytes::from("role:master\nmaster_replid:8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb\nmaster_repl_offset:0")))
                                 } else {
-                                    Some(RESP::BulkString(Some("role:slave".into())))
+                                    Some(RESP::BulkString(Bytes::from("role:slave")))
                                 }
                             }
 
@@ -407,15 +411,15 @@ async fn init_db(dir: &Option<String>, db_filename: &Option<String>) -> Db {
                 parser.parse().await.unwrap();
 
                 parser.get_kv_pairs().for_each(|(k, (v, exp))| {
-                    if let &RESP::BulkString(Some(ref x)) = v {
+                    if let RESP::BulkString(x) = v {
                         match exp {
                             Some(exp) if *exp > SystemTime::now() => db.set(
                                 k.clone(),
-                                Bytes::from(x.clone()),
+                                x.clone(),
                                 exp.duration_since(SystemTime::now()).ok(),
                             ),
                             Some(_) => {} // expired
-                            None => db.set(k.clone(), Bytes::from(x.clone()), None),
+                            None => db.set(k.clone(), x.clone(), None),
                         }
                     }
                 });
@@ -438,20 +442,20 @@ async fn handshake(
         let mut conn = Connection::new(reader);
 
         // The replica sends a PING to the master
-        let resp = RESP::Array(vec![RESP::BulkString(Some("PING".into()))]);
+        let resp = RESP::Array(vec![RESP::BulkString(Bytes::from("PING"))]);
         writer.write_all(resp.encode().as_bytes()).await?;
 
         // The replica sends REPLCONF twice to the master
         let resp1 = RESP::Array(vec![
-            RESP::BulkString(Some("REPLCONF".into())),
-            RESP::BulkString(Some("listening-port".into())),
-            RESP::BulkString(Some(listening_port.to_string())),
+            RESP::BulkString(Bytes::from("REPLCONF")),
+            RESP::BulkString(Bytes::from("listening-port")),
+            RESP::BulkString(Bytes::from(listening_port.to_string())),
         ]);
 
         let resp2 = RESP::Array(vec![
-            RESP::BulkString(Some("REPLCONF".into())),
-            RESP::BulkString(Some("capa".into())),
-            RESP::BulkString(Some("psync2".into())),
+            RESP::BulkString(Bytes::from("REPLCONF")),
+            RESP::BulkString(Bytes::from("capa")),
+            RESP::BulkString(Bytes::from("psync2")),
         ]);
 
         let mut data = resp1.encode().into_bytes();
@@ -468,9 +472,9 @@ async fn handshake(
         assert_eq!(Some(RESP::SimpleString("OK".into())), resp);
 
         let resp = RESP::Array(vec![
-            RESP::BulkString(Some("PSYNC".into())),
-            RESP::BulkString(Some("?".into())),
-            RESP::BulkString(Some("-1".into())),
+            RESP::BulkString(Bytes::from("PSYNC")),
+            RESP::BulkString(Bytes::from("?")),
+            RESP::BulkString(Bytes::from("-1")),
         ]);
         writer.write_all(resp.encode().as_bytes()).await?;
 
@@ -494,13 +498,14 @@ async fn handshake(
             while let Ok(Some(resp)) = conn.read_frame().await {
                 println!("replica receive command from master: {:?}", resp);
                 if let RESP::Array(ref arr) = resp {
-                    if let Some(RESP::BulkString(Some(cmd))) = arr.first() {
+                    if let Some(RESP::BulkString(cmd)) = arr.first() {
+                        let cmd = String::from_utf8_lossy(cmd);
                         match cmd.to_lowercase().as_str() {
                             "replconf" => {
                                 let resp = RESP::Array(vec![
-                                    RESP::BulkString(Some("REPLCONF".into())),
-                                    RESP::BulkString(Some("ACK".into())),
-                                    RESP::BulkString(Some(offset.to_string())),
+                                    RESP::BulkString(Bytes::from("REPLCONF")),
+                                    RESP::BulkString(Bytes::from("ACK")),
+                                    RESP::BulkString(Bytes::from(offset.to_string())),
                                 ]);
 
                                 let data = resp.encode();
@@ -514,19 +519,24 @@ async fn handshake(
 
                                 let px = arr.get(3);
 
-                                if let RESP::BulkString(Some(key)) = key {
-                                    if let RESP::BulkString(Some(val)) = val {
+                                if let RESP::BulkString(key) = key {
+                                    if let RESP::BulkString(val) = val {
                                         let mut exp = None;
                                         if px.is_some_and(|x| {
-                                            *x == RESP::BulkString(Some("px".to_string()))
+                                            *x == RESP::BulkString(Bytes::from("px"))
                                         }) {
                                             let exp_data = arr.get(4).unwrap();
-                                            if let RESP::BulkString(Some(e)) = exp_data {
-                                                let u64_exp: u64 = e.parse().unwrap();
+                                            if let RESP::BulkString(e) = exp_data {
+                                                let u64_exp: u64 =
+                                                    String::from_utf8_lossy(e).parse().unwrap();
                                                 exp = Some(Duration::from_millis(u64_exp));
                                             }
                                         }
-                                        db.set(key.to_string(), Bytes::from(val.to_string()), exp);
+                                        db.set(
+                                            String::from_utf8_lossy(key).to_string(),
+                                            val.clone(),
+                                            exp,
+                                        );
                                     }
                                 }
                             }

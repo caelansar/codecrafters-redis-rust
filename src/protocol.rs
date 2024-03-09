@@ -1,7 +1,5 @@
+use bytes::Bytes;
 use std::str::FromStr;
-
-const CR: &str = "\r";
-const LF: &str = "\n";
 
 // Redis Serialization Protocol
 #[derive(Debug, PartialOrd, PartialEq, Clone)]
@@ -11,7 +9,7 @@ pub enum RESP {
     SimpleString(String),
     // A bulk string represents a single binary string. The string can be of any size,
     // but by default, Redis limits it to 512 MB (see the proto-max-bulk-len configuration directive).
-    BulkString(Option<String>),
+    BulkString(Bytes),
     // Clients send commands to the Redis server as RESP arrays. Similarly, some Redis commands that
     // return collections of elements use arrays as their replies. An example is the LRANGE command that returns elements of a list.
     Array(Vec<RESP>),
@@ -57,12 +55,11 @@ impl RESP {
                 res.push_str(&format!(":{}\r\n", i));
             }
             Self::BulkString(s) => {
-                if s.is_none() {
-                    res.push_str("$-1\r\n");
-                } else {
-                    let s = s.as_ref().unwrap();
-                    res.push_str(&format!("${}\r\n{}\r\n", s.len(), s));
-                }
+                res.push_str(&format!(
+                    "${}\r\n{}\r\n",
+                    s.len(),
+                    String::from_utf8_lossy(s)
+                ));
             }
             Self::Array(v) => {
                 res.push_str(&format!("*{}\r\n", v.len()));
@@ -72,7 +69,7 @@ impl RESP {
                 })
             }
             Self::Null => {
-                res.push_str("_\r\n");
+                res.push_str("$-1\r\n");
             }
         }
         res
@@ -217,7 +214,7 @@ impl<'a> Decoder<'a> {
         self.pos += len;
         self.pos += 2;
 
-        Ok(Some(RESP::BulkString(Some(s))))
+        Ok(Some(RESP::BulkString(Bytes::from(s))))
     }
 }
 
@@ -250,7 +247,7 @@ mod tests {
             },
             Testcase {
                 cmd: "$5\r\nhello\r\n",
-                resp: Ok(RESP::BulkString(Some("hello".into()))),
+                resp: Ok(RESP::BulkString(Bytes::from("hello"))),
             },
             Testcase {
                 cmd: "$5",
@@ -259,8 +256,8 @@ mod tests {
             Testcase {
                 cmd: "*2\r\n$4\r\nECHO\r\n$3\r\nhey\r\n",
                 resp: Ok(RESP::Array(vec![
-                    RESP::BulkString(Some("ECHO".into())),
-                    RESP::BulkString(Some("hey".into())),
+                    RESP::BulkString(Bytes::from("ECHO")),
+                    RESP::BulkString(Bytes::from("hey")),
                 ])),
             },
         ];

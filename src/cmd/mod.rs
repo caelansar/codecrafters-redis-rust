@@ -48,6 +48,7 @@ impl Command {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bytes::Bytes;
     use std::time::Duration;
 
     struct Testcase {
@@ -60,18 +61,18 @@ mod tests {
         let testcases = vec![
             Testcase {
                 resp: RESP::Array(vec![
-                    RESP::BulkString(Some("GET".into())),
-                    RESP::BulkString(Some("hey".into())),
+                    RESP::BulkString(Bytes::from("GET")),
+                    RESP::BulkString(Bytes::from("hey")),
                 ]),
                 cmd: Command::Get(Get::new("hey")),
             },
             Testcase {
                 resp: RESP::Array(vec![
-                    RESP::BulkString(Some("SET".into())),
-                    RESP::BulkString(Some("key".into())),
-                    RESP::BulkString(Some("val".into())),
-                    RESP::BulkString(Some("PX".into())),
-                    RESP::BulkString(Some("100".into())),
+                    RESP::BulkString(Bytes::from("SET")),
+                    RESP::BulkString(Bytes::from("key")),
+                    RESP::BulkString(Bytes::from("val")),
+                    RESP::BulkString(Bytes::from("PX")),
+                    RESP::BulkString(Bytes::from("100")),
                 ]),
                 cmd: Command::Set(Set::new(
                     "key",
@@ -81,11 +82,11 @@ mod tests {
             },
             Testcase {
                 resp: RESP::Array(vec![
-                    RESP::BulkString(Some("SET".into())),
-                    RESP::BulkString(Some("key".into())),
-                    RESP::BulkString(Some("val".into())),
-                    RESP::BulkString(Some("EX".into())),
-                    RESP::BulkString(Some("100".into())),
+                    RESP::BulkString(Bytes::from("SET")),
+                    RESP::BulkString(Bytes::from("key")),
+                    RESP::BulkString(Bytes::from("val")),
+                    RESP::BulkString(Bytes::from("EX")),
+                    RESP::BulkString(Bytes::from("100")),
                 ]),
                 cmd: Command::Set(Set::new(
                     "key",

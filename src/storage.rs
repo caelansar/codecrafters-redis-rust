@@ -114,7 +114,7 @@ impl Db {
         state
             .entries
             .keys()
-            .map(|x| RESP::BulkString(Some(x.clone())))
+            .map(|x| RESP::BulkString(Bytes::from(x.clone())))
             .collect::<Vec<RESP>>()
     }
 

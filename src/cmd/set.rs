@@ -127,17 +127,15 @@ impl Set {
     /// the server.
     pub(crate) fn into_frame(self) -> RESP {
         let mut resp = vec![];
-        resp.push(RESP::BulkString(Some("set".to_string())));
-        resp.push(RESP::BulkString(Some(self.key.to_string())));
-        resp.push(RESP::BulkString(Some(
-            String::from_utf8_lossy(&self.value).to_string(),
-        )));
+        resp.push(RESP::BulkString(Bytes::from("set")));
+        resp.push(RESP::BulkString(Bytes::from(self.key)));
+        resp.push(RESP::BulkString(self.value));
         if let Some(ms) = self.expire {
             // Expirations in Redis protocol can be specified in two ways
             // 1. SET key value EX seconds
             // 2. SET key value PX milliseconds
-            resp.push(RESP::BulkString(Some("px".to_string())));
-            resp.push(RESP::BulkString(Some(ms.as_millis().to_string())));
+            resp.push(RESP::BulkString(Bytes::from("px")));
+            resp.push(RESP::BulkString(Bytes::from(ms.as_millis().to_string())));
         }
         RESP::Array(resp)
     }

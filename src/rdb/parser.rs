@@ -4,6 +4,7 @@ use super::{
     int_to_vec, read_exact,
 };
 use crate::protocol::RESP;
+use bytes::Bytes;
 use std::mem;
 use std::ops::Add;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -162,10 +163,7 @@ impl<R: AsyncRead + Unpin> Parser<R> {
 
                             self.kvs.push((
                                 String::from_utf8(key).unwrap(),
-                                (
-                                    RESP::BulkString(String::from_utf8(v).ok()),
-                                    self.last_expired,
-                                ),
+                                (RESP::BulkString(Bytes::from(v)), self.last_expired),
                             ));
                         }
                         _ => unimplemented!(),
@@ -201,27 +199,27 @@ mod tests {
             vec![
                 (
                     "183358245".to_string(),
-                    BulkString(Some("Positive 32 bit integer".into()))
+                    BulkString(Bytes::from("Positive 32 bit integer"))
                 ),
                 (
                     "125".to_string(),
-                    BulkString(Some("Positive 8 bit integer".into()))
+                    BulkString(Bytes::from("Positive 8 bit integer"))
                 ),
                 (
                     "-29477".to_string(),
-                    BulkString(Some("Negative 16 bit integer".into()))
+                    BulkString(Bytes::from("Negative 16 bit integer"))
                 ),
                 (
                     "-123".to_string(),
-                    BulkString(Some("Negative 8 bit integer".into()))
+                    BulkString(Bytes::from("Negative 8 bit integer"))
                 ),
                 (
                     "43947".to_string(),
-                    BulkString(Some("Positive 16 bit integer".into()))
+                    BulkString(Bytes::from("Positive 16 bit integer"))
                 ),
                 (
                     "-183358245".to_string(),
-                    BulkString(Some("Negative 32 bit integer".into()))
+                    BulkString(Bytes::from("Negative 32 bit integer"))
                 ),
             ],
             parser

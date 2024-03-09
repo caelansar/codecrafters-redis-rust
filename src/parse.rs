@@ -60,7 +60,7 @@ impl Parse {
             // While errors are stored as strings, they are considered separate
             // types.
             RESP::SimpleString(s) => Ok(s),
-            RESP::BulkString(data) => data.ok_or_else(|| "protocol error; invalid string".into()),
+            RESP::BulkString(data) => Ok(String::from_utf8_lossy(&data).to_string()),
             frame => Err(format!(
                 "protocol error; expected simple frame or bulk frame, got {:?}",
                 frame
@@ -80,7 +80,7 @@ impl Parse {
             // Although errors are stored as strings and could be represented as
             // raw bytes, they are considered separate types.
             RESP::SimpleString(s) => Ok(Bytes::from(s.into_bytes())),
-            RESP::BulkString(data) => Ok(Bytes::from(data.unwrap().into_bytes())),
+            RESP::BulkString(data) => Ok(data),
             frame => Err(format!(
                 "protocol error; expected simple frame or bulk frame, got {:?}",
                 frame
@@ -105,7 +105,9 @@ impl Parse {
             // Simple and bulk frames must be parsed as integers. If the parsing
             // fails, an error is returned.
             RESP::SimpleString(data) => data.parse::<u64>().map_err(|_| MSG.into()),
-            RESP::BulkString(data) => data.unwrap().parse::<u64>().map_err(|_| MSG.into()),
+            RESP::BulkString(data) => String::from_utf8_lossy(&data)
+                .parse::<u64>()
+                .map_err(|_| MSG.into()),
             frame => Err(format!("protocol error; expected int frame but got {:?}", frame).into()),
         }
     }
