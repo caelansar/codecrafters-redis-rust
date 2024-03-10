@@ -85,23 +85,33 @@ async fn handle_connection(
                     .await
                     .unwrap();
             }
+            Command::Type(typ) => {
+                let resp = match db.get(typ.key()) {
+                    Some(_) => RESP::SimpleString("string".to_string()),
+                    None => RESP::SimpleString("none".to_string()),
+                };
+                writer
+                    .lock()
+                    .await
+                    .write_all(resp.encode().as_bytes())
+                    .await
+                    .unwrap();
+            }
             Command::Get(get) => {
                 // TODO: remove
                 // block command to let it propagate to replicas
                 tokio::time::sleep(Duration::from_millis(20)).await;
 
                 let resp = match db.get(get.key()) {
-                    Some(e) => Some(RESP::BulkString(e)),
-                    None => Some(RESP::Null),
+                    Some(e) => RESP::BulkString(e),
+                    None => RESP::Null,
                 };
-                if let Some(resp) = resp {
-                    writer
-                        .lock()
-                        .await
-                        .write_all(resp.encode().as_bytes())
-                        .await
-                        .unwrap();
-                }
+                writer
+                    .lock()
+                    .await
+                    .write_all(resp.encode().as_bytes())
+                    .await
+                    .unwrap();
             }
             Command::Set(set) => {
                 // master node, propagate SET command

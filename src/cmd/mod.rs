@@ -3,11 +3,13 @@ mod get;
 mod keys;
 mod ping;
 mod set;
+mod r#type;
 
 use crate::cmd::echo::Echo;
 use crate::cmd::get::Get;
 use crate::cmd::keys::Keys;
 use crate::cmd::ping::Ping;
+use crate::cmd::r#type::Type;
 use crate::cmd::set::Set;
 use crate::parse::Parse;
 use crate::protocol::RESP;
@@ -19,6 +21,7 @@ pub enum Command {
     Echo(Echo),
     Keys(Keys),
     Ping(Ping),
+    Type(Type),
     Raw(RESP),
 }
 
@@ -34,6 +37,7 @@ impl Command {
             "echo" => Command::Echo(Echo::parse_frames(&mut parse)?),
             "keys" => Command::Keys(Keys::parse_frames(&mut parse)?),
             "ping" => Command::Ping(Ping::parse_frames(&mut parse)?),
+            "type" => Command::Type(Type::parse_frames(&mut parse)?),
             _ => Command::Raw(resp),
         };
 
