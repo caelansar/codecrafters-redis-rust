@@ -4,6 +4,7 @@ mod keys;
 mod ping;
 mod set;
 mod r#type;
+mod xadd;
 
 use crate::cmd::echo::Echo;
 use crate::cmd::get::Get;
@@ -11,6 +12,7 @@ use crate::cmd::keys::Keys;
 use crate::cmd::ping::Ping;
 use crate::cmd::r#type::Type;
 use crate::cmd::set::Set;
+use crate::cmd::xadd::Xadd;
 use crate::parse::Parse;
 use crate::protocol::RESP;
 
@@ -22,6 +24,7 @@ pub enum Command {
     Keys(Keys),
     Ping(Ping),
     Type(Type),
+    Xadd(Xadd),
     Raw(RESP),
 }
 
@@ -38,10 +41,11 @@ impl Command {
             "keys" => Command::Keys(Keys::parse_frames(&mut parse)?),
             "ping" => Command::Ping(Ping::parse_frames(&mut parse)?),
             "type" => Command::Type(Type::parse_frames(&mut parse)?),
+            "xadd" => Command::Xadd(Xadd::parse_frames(&mut parse)?),
             _ => Command::Raw(resp),
         };
 
-        if !matches!(command, Command::Raw(_)) {
+        if !matches!(command, Command::Raw(_) | Command::Xadd(_)) {
             parse.finish()?;
         }
 

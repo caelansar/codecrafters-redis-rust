@@ -85,10 +85,28 @@ async fn handle_connection(
                     .await
                     .unwrap();
             }
+            Command::Xadd(xadd) => {
+                let resp = RESP::BulkString(Bytes::from(xadd.id().to_string()));
+
+                db.set_stream(xadd.key());
+
+                writer
+                    .lock()
+                    .await
+                    .write_all(resp.encode().as_bytes())
+                    .await
+                    .unwrap();
+            }
             Command::Type(typ) => {
                 let resp = match db.get(typ.key()) {
                     Some(_) => RESP::SimpleString("string".to_string()),
-                    None => RESP::SimpleString("none".to_string()),
+                    None => {
+                        if db.get_stream(typ.key()) {
+                            RESP::SimpleString("stream".to_string())
+                        } else {
+                            RESP::SimpleString("none".to_string())
+                        }
+                    }
                 };
                 writer
                     .lock()
@@ -287,7 +305,7 @@ async fn handle_connection(
                                 }
                             }
 
-                            _ => unimplemented!(),
+                            _ => Some(RESP::Null),
                         };
 
                         if let Some(resp) = resp {

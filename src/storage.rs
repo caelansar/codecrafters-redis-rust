@@ -1,6 +1,6 @@
 use crate::protocol::RESP;
 use bytes::Bytes;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::{broadcast, Notify};
@@ -50,6 +50,8 @@ struct State {
     /// and pub/sub. `mini-redis` handles this by using a separate `HashMap`.
     pub_sub: HashMap<String, broadcast::Sender<Bytes>>,
 
+    stream: HashSet<String>,
+
     /// Tracks key TTLs.
     ///
     /// A `BTreeSet` is used to maintain expirations sorted by when they expire.
@@ -82,6 +84,7 @@ impl Db {
             state: Mutex::new(State {
                 entries: HashMap::new(),
                 pub_sub: HashMap::new(),
+                stream: HashSet::new(),
                 expirations: BTreeSet::new(),
                 shutdown: false,
             }),
@@ -89,7 +92,7 @@ impl Db {
         });
 
         // Start the background task.
-        println!("start task");
+        println!("start purge_expired_tasks");
         tokio::spawn(purge_expired_tasks(shared.clone()));
 
         Db { shared }
@@ -107,6 +110,16 @@ impl Db {
         // clone. Data is not copied.
         let state = self.shared.state.lock().unwrap();
         state.entries.get(key).map(|entry| entry.data.clone())
+    }
+
+    pub(crate) fn set_stream(&self, key: impl ToString) -> bool {
+        let mut state = self.shared.state.lock().unwrap();
+        state.stream.insert(key.to_string())
+    }
+
+    pub(crate) fn get_stream(&self, key: &str) -> bool {
+        let state = self.shared.state.lock().unwrap();
+        state.stream.get(key).is_some()
     }
 
     pub(crate) fn keys(&self) -> Vec<RESP> {
