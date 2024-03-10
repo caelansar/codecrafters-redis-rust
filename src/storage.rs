@@ -1,7 +1,6 @@
 use crate::protocol::RESP;
-use anyhow::anyhow;
 use bytes::Bytes;
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::{broadcast, Notify};
@@ -51,7 +50,7 @@ struct State {
     /// and pub/sub. `mini-redis` handles this by using a separate `HashMap`.
     pub_sub: HashMap<String, broadcast::Sender<Bytes>>,
 
-    stream: HashMap<String, HashSet<String>>,
+    stream: HashMap<String, BTreeSet<String>>,
 
     /// Tracks key TTLs.
     ///
@@ -129,7 +128,7 @@ impl Db {
                 let last = set.iter().last();
                 match last {
                     None => {
-                        e.insert(HashSet::from([id.to_string()]));
+                        e.insert(BTreeSet::from([id.to_string()]));
                     }
                     Some(x) if *x < id.to_string() => {
                         let entry = e.get_mut();
@@ -141,15 +140,15 @@ impl Db {
                 }
             }
             Entry::Vacant(e) => {
-                e.insert(HashSet::from([id.to_string()]));
+                e.insert(BTreeSet::from([id.to_string()]));
             }
         }
         Ok(())
     }
 
-    pub(crate) fn get_stream(&self, key: &str) -> bool {
+    pub(crate) fn get_stream(&self, key: &str) -> Option<BTreeSet<String>> {
         let state = self.shared.state.lock().unwrap();
-        state.stream.get(key).is_some()
+        state.stream.get(key).cloned()
     }
 
     pub(crate) fn keys(&self) -> Vec<RESP> {

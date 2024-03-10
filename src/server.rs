@@ -86,8 +86,49 @@ async fn handle_connection(
                     .unwrap();
             }
             Command::Xadd(xadd) => {
-                let resp = match db.set_stream(xadd.key(), xadd.id()) {
-                    Ok(_) => RESP::BulkString(Bytes::from(xadd.id().to_string())),
+                let mut id = xadd.id().to_string();
+
+                let parts = id.split_once('-');
+                if let Some((time, seq)) = parts {
+                    if seq == "*" {
+                        match db.get_stream(xadd.key()) {
+                            None => {
+                                if time == "0" {
+                                    id = format!("{}-{}", time, 1);
+                                } else {
+                                    id = format!("{}-{}", time, 0);
+                                }
+                            }
+                            Some(stream) => {
+                                let next_seq = stream
+                                    .iter()
+                                    .filter_map(|s| {
+                                        let (t, s) = s.split_once('-').unwrap();
+                                        if t == time {
+                                            Some((t, s))
+                                        } else {
+                                            None
+                                        }
+                                    })
+                                    .last()
+                                    .map(|(_, seq)| {
+                                        let seq: u64 = seq.parse().unwrap();
+                                        seq + 1
+                                    });
+                                if next_seq.is_some() {
+                                    println!("next seq: {:?}", next_seq);
+
+                                    id = format!("{}-{}", time, next_seq.unwrap());
+                                } else {
+                                    id = format!("{}-{}", time, 0);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                let resp = match db.set_stream(xadd.key(), id.clone()) {
+                    Ok(_) => RESP::BulkString(Bytes::from(id)),
                     Err(e) => RESP::Error(e.to_string()),
                 };
 
@@ -102,7 +143,7 @@ async fn handle_connection(
                 let resp = match db.get(typ.key()) {
                     Some(_) => RESP::SimpleString("string".to_string()),
                     None => {
-                        if db.get_stream(typ.key()) {
+                        if db.get_stream(typ.key()).is_some() {
                             RESP::SimpleString("stream".to_string())
                         } else {
                             RESP::SimpleString("none".to_string())
