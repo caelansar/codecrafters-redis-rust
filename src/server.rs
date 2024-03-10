@@ -86,9 +86,10 @@ async fn handle_connection(
                     .unwrap();
             }
             Command::Xadd(xadd) => {
-                let resp = RESP::BulkString(Bytes::from(xadd.id().to_string()));
-
-                db.set_stream(xadd.key());
+                let resp = match db.set_stream(xadd.key(), xadd.id()) {
+                    Ok(_) => RESP::BulkString(Bytes::from(xadd.id().to_string())),
+                    Err(e) => RESP::Error(e.to_string()),
+                };
 
                 writer
                     .lock()

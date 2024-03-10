@@ -11,12 +11,16 @@ pub enum RESP {
     // but by default, Redis limits it to 512 MB (see the proto-max-bulk-len configuration directive).
     BulkString(Bytes),
     // Clients send commands to the Redis server as RESP arrays. Similarly, some Redis commands that
-    // return collections of elements use arrays as their replies. An example is the LRANGE command that returns elements of a list.
+    // return collections of elements use arrays as their replies. An example is the LRANGE command that
+    // returns elements of a list.
     Array(Vec<RESP>),
     // A CRLF-terminated string that represents a signed, base-10, 64-bit integer.
     Integer(i64),
     // The null data type represents non-existent values.
     Null,
+    // RESP has specific data types for errors. Simple errors, or simply just errors, are similar to simple
+    // strings, but their first character is the minus (-) character.
+    Error(String),
 }
 
 #[derive(thiserror::Error, Debug, PartialEq)]
@@ -70,6 +74,9 @@ impl RESP {
             }
             Self::Null => {
                 res.push_str("$-1\r\n");
+            }
+            Self::Error(e) => {
+                res.push_str(&format!("-{}\r\n", e));
             }
         }
         res

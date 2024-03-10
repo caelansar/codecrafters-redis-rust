@@ -1,4 +1,5 @@
 use crate::protocol::RESP;
+use anyhow::anyhow;
 use bytes::Bytes;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::{Arc, Mutex};
@@ -50,7 +51,7 @@ struct State {
     /// and pub/sub. `mini-redis` handles this by using a separate `HashMap`.
     pub_sub: HashMap<String, broadcast::Sender<Bytes>>,
 
-    stream: HashSet<String>,
+    stream: HashMap<String, HashSet<String>>,
 
     /// Tracks key TTLs.
     ///
@@ -84,7 +85,7 @@ impl Db {
             state: Mutex::new(State {
                 entries: HashMap::new(),
                 pub_sub: HashMap::new(),
-                stream: HashSet::new(),
+                stream: HashMap::new(),
                 expirations: BTreeSet::new(),
                 shutdown: false,
             }),
@@ -112,9 +113,38 @@ impl Db {
         state.entries.get(key).map(|entry| entry.data.clone())
     }
 
-    pub(crate) fn set_stream(&self, key: impl ToString) -> bool {
+    pub(crate) fn set_stream(&self, key: impl ToString, id: impl ToString) -> anyhow::Result<()> {
+        use std::collections::hash_map::Entry;
+
+        if id.to_string() == "0-0" {
+            anyhow::bail!("ERR The ID specified in XADD must be greater than 0-0")
+        }
+
         let mut state = self.shared.state.lock().unwrap();
-        state.stream.insert(key.to_string())
+        let entry = state.stream.entry(key.to_string());
+        match entry {
+            Entry::Occupied(mut e) => {
+                let set = e.get();
+
+                let last = set.iter().last();
+                match last {
+                    None => {
+                        e.insert(HashSet::from([id.to_string()]));
+                    }
+                    Some(x) if *x < id.to_string() => {
+                        let entry = e.get_mut();
+                        entry.insert(id.to_string());
+                    }
+                    Some(_) => {
+                        anyhow::bail!("ERR The ID specified in XADD is equal or smaller than the target stream top item");
+                    }
+                }
+            }
+            Entry::Vacant(e) => {
+                e.insert(HashSet::from([id.to_string()]));
+            }
+        }
+        Ok(())
     }
 
     pub(crate) fn get_stream(&self, key: &str) -> bool {
@@ -386,10 +416,20 @@ async fn test_db() {
 
     let mut recv = db.subscribe("k".to_string());
 
+    let db1 = db.clone();
     tokio::spawn(async move {
-        let n = db.publish("k", Bytes::from("v"));
+        let n = db1.publish("k", Bytes::from("v"));
         assert_eq!(1, n);
     });
 
     assert_eq!(Ok(Bytes::from("v")), recv.recv().await);
+
+    db.set_stream("s", "1-1").unwrap();
+    db.set_stream("s", "1-2").unwrap();
+
+    assert!(
+        db.set_stream("s", "1-2").is_err(),
+        "Passing in an ID lower than should result in an error"
+    );
+    assert!(db.set_stream("s", "0-0").is_err());
 }

@@ -28,6 +28,9 @@ impl Xadd {
         // TODO: XADD supports auto-generating stream IDs
         let stream_id = parse.next_string()?;
 
-        Ok(Self { stream_key, stream_id })
+        Ok(Self {
+            stream_key,
+            stream_id,
+        })
     }
 }
