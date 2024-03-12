@@ -85,6 +85,53 @@ async fn handle_connection(
                     .await
                     .unwrap();
             }
+            Command::XRange(xrange) => {
+                let key = xrange.key();
+
+                let mut arr = Vec::new();
+                let resp = match db.get_stream(key) {
+                    Some(stream) => {
+                        println!("stream length: {}", stream.len());
+
+                        let (start, end) = xrange.range();
+                        let mut start = start.to_string();
+                        let mut end = end.to_string();
+
+                        if !start.contains('-') {
+                            start.push_str("-0")
+                        }
+                        if !end.contains('-') {
+                            end.push_str("-9999")
+                        }
+
+                        let iter = stream.iter().filter(|(id, _)| {
+                            id.as_str() >= start.as_str() && id.as_str() <= end.as_str()
+                        });
+                        iter.for_each(|(id, data)| {
+                            let mut items = Vec::new();
+                            items.push(RESP::BulkString(Bytes::from(id.to_string())));
+
+                            let mut data_items = Vec::new();
+                            data.iter().for_each(|(k, v)| {
+                                data_items.push(RESP::BulkString(Bytes::from(k.to_string())));
+                                data_items.push(RESP::BulkString(Bytes::from(v.to_string())));
+                            });
+                            items.push(RESP::Array(data_items));
+                            arr.push(RESP::Array(items));
+                        });
+
+                        RESP::Array(arr)
+                    }
+                    None => RESP::Array(arr),
+                };
+
+                writer
+                    .lock()
+                    .await
+                    .write_all(resp.encode().as_bytes())
+                    .await
+                    .unwrap();
+            }
             Command::Xadd(xadd) => {
                 let mut id = xadd.id().to_string();
 
@@ -110,7 +157,7 @@ async fn handle_connection(
                                     Some(stream) => {
                                         let next_seq = stream
                                             .iter()
-                                            .filter_map(|s| {
+                                            .filter_map(|(s, _)| {
                                                 let (t, s) = s.split_once('-').unwrap();
                                                 if t == time {
                                                     Some((t, s))
@@ -137,7 +184,7 @@ async fn handle_connection(
                     }
                 }
 
-                let resp = match db.set_stream(xadd.key(), id.clone()) {
+                let resp = match db.set_stream(xadd.key(), id.clone(), xadd.data()) {
                     Ok(_) => RESP::BulkString(Bytes::from(id)),
                     Err(e) => RESP::Error(e.to_string()),
                 };

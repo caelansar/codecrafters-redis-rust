@@ -1,6 +1,6 @@
 use crate::protocol::RESP;
 use bytes::Bytes;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::{broadcast, Notify};
@@ -50,7 +50,7 @@ struct State {
     /// and pub/sub. `mini-redis` handles this by using a separate `HashMap`.
     pub_sub: HashMap<String, broadcast::Sender<Bytes>>,
 
-    stream: HashMap<String, BTreeSet<String>>,
+    stream: HashMap<String, BTreeMap<String, Vec<(String, String)>>>,
 
     /// Tracks key TTLs.
     ///
@@ -112,7 +112,12 @@ impl Db {
         state.entries.get(key).map(|entry| entry.data.clone())
     }
 
-    pub(crate) fn set_stream(&self, key: impl ToString, id: impl ToString) -> anyhow::Result<()> {
+    pub(crate) fn set_stream(
+        &self,
+        key: impl ToString,
+        id: impl ToString,
+        data: Vec<(String, String)>,
+    ) -> anyhow::Result<()> {
         use std::collections::hash_map::Entry;
 
         if id.to_string() == "0-0" {
@@ -128,11 +133,13 @@ impl Db {
                 let last = set.iter().last();
                 match last {
                     None => {
-                        e.insert(BTreeSet::from([id.to_string()]));
+                        let mut set = BTreeMap::new();
+                        set.insert(id.to_string(), data);
+                        e.insert(set);
                     }
-                    Some(x) if *x < id.to_string() => {
+                    Some(x) if *x.0 < id.to_string() => {
                         let entry = e.get_mut();
-                        entry.insert(id.to_string());
+                        entry.insert(id.to_string(), data);
                     }
                     Some(_) => {
                         anyhow::bail!("ERR The ID specified in XADD is equal or smaller than the target stream top item");
@@ -140,13 +147,15 @@ impl Db {
                 }
             }
             Entry::Vacant(e) => {
-                e.insert(BTreeSet::from([id.to_string()]));
+                let mut set = BTreeMap::new();
+                set.insert(id.to_string(), data);
+                e.insert(set);
             }
         }
         Ok(())
     }
 
-    pub(crate) fn get_stream(&self, key: &str) -> Option<BTreeSet<String>> {
+    pub(crate) fn get_stream(&self, key: &str) -> Option<BTreeMap<String, Vec<(String, String)>>> {
         let state = self.shared.state.lock().unwrap();
         state.stream.get(key).cloned()
     }
@@ -423,12 +432,14 @@ async fn test_db() {
 
     assert_eq!(Ok(Bytes::from("v")), recv.recv().await);
 
-    db.set_stream("s", "1-1").unwrap();
-    db.set_stream("s", "1-2").unwrap();
+    let data = Vec::new();
+
+    db.set_stream("s", "1-1", data.clone()).unwrap();
+    db.set_stream("s", "1-2", data.clone()).unwrap();
 
     assert!(
-        db.set_stream("s", "1-2").is_err(),
+        db.set_stream("s", "1-2", data.clone()).is_err(),
         "Passing in an ID lower than should result in an error"
     );
-    assert!(db.set_stream("s", "0-0").is_err());
+    assert!(db.set_stream("s", "0-0", data).is_err());
 }

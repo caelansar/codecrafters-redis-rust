@@ -5,6 +5,7 @@ mod ping;
 mod set;
 mod r#type;
 mod xadd;
+mod xrange;
 
 use crate::cmd::echo::Echo;
 use crate::cmd::get::Get;
@@ -13,10 +14,11 @@ use crate::cmd::ping::Ping;
 use crate::cmd::r#type::Type;
 use crate::cmd::set::Set;
 use crate::cmd::xadd::Xadd;
+use crate::cmd::xrange::XRange;
 use crate::parse::Parse;
 use crate::protocol::RESP;
 
-#[derive(Debug, PartialOrd, PartialEq)]
+#[derive(Debug, PartialEq)]
 pub enum Command {
     Get(Get),
     Set(Set),
@@ -25,6 +27,7 @@ pub enum Command {
     Ping(Ping),
     Type(Type),
     Xadd(Xadd),
+    XRange(XRange),
     Raw(RESP),
 }
 
@@ -42,6 +45,7 @@ impl Command {
             "ping" => Command::Ping(Ping::parse_frames(&mut parse)?),
             "type" => Command::Type(Type::parse_frames(&mut parse)?),
             "xadd" => Command::Xadd(Xadd::parse_frames(&mut parse)?),
+            "xrange" => Command::XRange(XRange::parse_frames(&mut parse)?),
             _ => Command::Raw(resp),
         };
 
@@ -56,7 +60,9 @@ impl Command {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cmd::xrange::XRange;
     use bytes::Bytes;
+    use std::collections::BTreeMap;
     use std::time::Duration;
 
     struct Testcase {
@@ -100,6 +106,33 @@ mod tests {
                     "key",
                     "val".into(),
                     Some(Duration::from_secs(100)),
+                )),
+            },
+            Testcase {
+                resp: RESP::Array(vec![
+                    RESP::BulkString(Bytes::from("XADD")),
+                    RESP::BulkString(Bytes::from("stream_key")),
+                    RESP::BulkString(Bytes::from("1-0")),
+                    RESP::BulkString(Bytes::from("k")),
+                    RESP::BulkString(Bytes::from("1")),
+                ]),
+                cmd: Command::Xadd(Xadd::new(
+                    "stream_key",
+                    "1-0",
+                    vec![("k".to_string(), "1".to_string())],
+                )),
+            },
+            Testcase {
+                resp: RESP::Array(vec![
+                    RESP::BulkString(Bytes::from("XRANGE")),
+                    RESP::BulkString(Bytes::from("stream_key")),
+                    RESP::BulkString(Bytes::from("1-0")),
+                    RESP::BulkString(Bytes::from("2-0")),
+                ]),
+                cmd: Command::XRange(XRange::new(
+                    "stream_key",
+                    "1-0".to_string(),
+                    "2-0".to_string(),
                 )),
             },
         ];
