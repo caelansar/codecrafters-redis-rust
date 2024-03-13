@@ -93,13 +93,8 @@ async fn handle_connection(
                     Some(stream) => {
                         println!("stream length: {}", stream.len());
 
-                        let (start, end) = xrange.range();
-                        let mut start = start.to_string();
-                        let mut end = end.to_string();
+                        let (start, mut end) = xrange.range();
 
-                        if !start.contains('-') {
-                            start.push_str("-0")
-                        }
                         if !end.contains('-') {
                             end.push_str("-9999")
                         }

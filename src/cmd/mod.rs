@@ -1,12 +1,3 @@
-mod echo;
-mod get;
-mod keys;
-mod ping;
-mod set;
-mod r#type;
-mod xadd;
-mod xrange;
-
 use crate::cmd::echo::Echo;
 use crate::cmd::get::Get;
 use crate::cmd::keys::Keys;
@@ -17,6 +8,15 @@ use crate::cmd::xadd::Xadd;
 use crate::cmd::xrange::XRange;
 use crate::parse::Parse;
 use crate::protocol::RESP;
+
+mod echo;
+mod get;
+mod keys;
+mod ping;
+mod set;
+mod r#type;
+mod xadd;
+mod xrange;
 
 #[derive(Debug, PartialEq)]
 pub enum Command {
@@ -60,9 +60,8 @@ impl Command {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cmd::xrange::XRange;
+    use crate::cmd::xrange::{Time, XRange};
     use bytes::Bytes;
-    use std::collections::BTreeMap;
     use std::time::Duration;
 
     struct Testcase {
@@ -131,7 +130,7 @@ mod tests {
                 ]),
                 cmd: Command::XRange(XRange::new(
                     "stream_key",
-                    "1-0".to_string(),
+                    Time::Specified("1-0".to_string()),
                     "2-0".to_string(),
                 )),
             },
