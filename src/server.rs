@@ -93,14 +93,9 @@ async fn handle_connection(
                     Some(stream) => {
                         println!("stream length: {}", stream.len());
 
-                        let (start, mut end) = xrange.range();
-
-                        if !end.contains('-') {
-                            end.push_str("-9999")
-                        }
-
                         let iter = stream.iter().filter(|(id, _)| {
-                            id.as_str() >= start.as_str() && id.as_str() <= end.as_str()
+                            let t = id.parse().unwrap();
+                            xrange.range().contains(&t)
                         });
                         iter.for_each(|(id, data)| {
                             let mut items = Vec::new();

@@ -14,6 +14,7 @@ mod get;
 mod keys;
 mod ping;
 mod set;
+mod time_spec;
 mod r#type;
 mod xadd;
 mod xrange;
@@ -60,7 +61,8 @@ impl Command {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cmd::xrange::{Time, XRange};
+    use crate::cmd::time_spec::TimeSepc;
+    use crate::cmd::xrange::XRange;
     use bytes::Bytes;
     use std::time::Duration;
 
@@ -126,12 +128,12 @@ mod tests {
                     RESP::BulkString(Bytes::from("XRANGE")),
                     RESP::BulkString(Bytes::from("stream_key")),
                     RESP::BulkString(Bytes::from("1-0")),
-                    RESP::BulkString(Bytes::from("2-0")),
+                    RESP::BulkString(Bytes::from("+")),
                 ]),
                 cmd: Command::XRange(XRange::new(
                     "stream_key",
-                    Time::Specified("1-0".to_string()),
-                    "2-0".to_string(),
+                    TimeSepc::Specified(1, 0),
+                    TimeSepc::EndWildcard,
                 )),
             },
         ];
