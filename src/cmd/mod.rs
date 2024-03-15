@@ -6,6 +6,7 @@ use crate::cmd::r#type::Type;
 use crate::cmd::set::Set;
 use crate::cmd::xadd::Xadd;
 use crate::cmd::xrange::XRange;
+use crate::cmd::xread::XRead;
 use crate::parse::Parse;
 use crate::protocol::RESP;
 
@@ -14,10 +15,11 @@ mod get;
 mod keys;
 mod ping;
 mod set;
-mod time_spec;
+pub mod time_spec;
 mod r#type;
 mod xadd;
 mod xrange;
+mod xread;
 
 #[derive(Debug, PartialEq)]
 pub enum Command {
@@ -29,6 +31,7 @@ pub enum Command {
     Type(Type),
     Xadd(Xadd),
     XRange(XRange),
+    XRead(XRead),
     Raw(RESP),
 }
 
@@ -47,6 +50,7 @@ impl Command {
             "type" => Command::Type(Type::parse_frames(&mut parse)?),
             "xadd" => Command::Xadd(Xadd::parse_frames(&mut parse)?),
             "xrange" => Command::XRange(XRange::parse_frames(&mut parse)?),
+            "xread" => Command::XRead(XRead::parse_frames(&mut parse)?),
             _ => Command::Raw(resp),
         };
 
@@ -135,6 +139,15 @@ mod tests {
                     TimeSepc::Specified(1, 0),
                     TimeSepc::EndWildcard,
                 )),
+            },
+            Testcase {
+                resp: RESP::Array(vec![
+                    RESP::BulkString(Bytes::from("XREAD")),
+                    RESP::BulkString(Bytes::from("streams")),
+                    RESP::BulkString(Bytes::from("stream_key")),
+                    RESP::BulkString(Bytes::from("1-0")),
+                ]),
+                cmd: Command::XRead(XRead::new("stream_key", TimeSepc::Specified(1, 0))),
             },
         ];
 

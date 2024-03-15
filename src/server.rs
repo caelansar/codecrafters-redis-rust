@@ -1,3 +1,4 @@
+use crate::cmd::time_spec::TimeSepc;
 use crate::cmd::Command;
 use crate::connection::Connection;
 use crate::protocol::RESP;
@@ -85,14 +86,57 @@ async fn handle_connection(
                     .await
                     .unwrap();
             }
+            Command::XRead(xread) => {
+                let (key, start) = xread.key_and_start();
+
+                let mut streams = Vec::new();
+
+                let mut arr = Vec::new();
+                arr.push(RESP::BulkString(Bytes::from(key.to_string())));
+
+                let resp = match db.get_stream(key) {
+                    Some(stream) => {
+                        let iter = stream.iter().filter(|(id, _)| {
+                            let t: TimeSepc = id.parse().unwrap();
+                            &t > start
+                        });
+
+                        let mut streams = Vec::new();
+
+                        iter.for_each(|(id, data)| {
+                            let mut items = Vec::new();
+                            items.push(RESP::BulkString(Bytes::from(id.to_string())));
+
+                            let mut data_items = Vec::new();
+                            data.iter().for_each(|(k, v)| {
+                                data_items.push(RESP::BulkString(Bytes::from(k.to_string())));
+                                data_items.push(RESP::BulkString(Bytes::from(v.to_string())));
+                            });
+                            items.push(RESP::Array(data_items));
+                            streams.push(RESP::Array(items));
+                        });
+
+                        arr.push(RESP::Array(streams));
+                        RESP::Array(arr)
+                    }
+                    None => RESP::Array(arr),
+                };
+
+                streams.push(resp);
+
+                writer
+                    .lock()
+                    .await
+                    .write_all(RESP::Array(streams).encode().as_bytes())
+                    .await
+                    .unwrap();
+            }
             Command::XRange(xrange) => {
                 let key = xrange.key();
 
                 let mut arr = Vec::new();
                 let resp = match db.get_stream(key) {
                     Some(stream) => {
-                        println!("stream length: {}", stream.len());
-
                         let iter = stream.iter().filter(|(id, _)| {
                             let t = id.parse().unwrap();
                             xrange.range().contains(&t)
