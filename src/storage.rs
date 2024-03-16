@@ -3,6 +3,7 @@ use bytes::Bytes;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use tokio::sync::oneshot::{channel, Receiver, Sender};
 use tokio::sync::{broadcast, Notify};
 use tokio::time;
 use tokio::time::Instant;
@@ -52,6 +53,8 @@ struct State {
 
     stream: HashMap<String, BTreeMap<String, Vec<(String, String)>>>,
 
+    block_stream: HashMap<String, Vec<Sender<RESP>>>,
+
     /// Tracks key TTLs.
     ///
     /// A `BTreeSet` is used to maintain expirations sorted by when they expire.
@@ -85,6 +88,7 @@ impl Db {
                 entries: HashMap::new(),
                 pub_sub: HashMap::new(),
                 stream: HashMap::new(),
+                block_stream: HashMap::new(),
                 expirations: BTreeSet::new(),
                 shutdown: false,
             }),
@@ -96,6 +100,30 @@ impl Db {
         tokio::spawn(purge_expired_tasks(shared.clone()));
 
         Db { shared }
+    }
+
+    pub(crate) fn get_all_block(&self, key: impl AsRef<str>) -> Vec<Sender<RESP>> {
+        let mut state = self.shared.state.lock().unwrap();
+        match state.block_stream.get_mut(key.as_ref()) {
+            Some(senders) => senders.drain(..).collect(),
+            None => vec![],
+        }
+    }
+
+    pub(crate) fn block_stream(&self, key: String) -> Receiver<RESP> {
+        use std::collections::hash_map::Entry;
+
+        let (tx, rx) = channel();
+        let mut state = self.shared.state.lock().unwrap();
+        match state.block_stream.entry(key) {
+            Entry::Occupied(mut e) => {
+                e.get_mut().push(tx);
+            }
+            Entry::Vacant(e) => {
+                e.insert(vec![tx]);
+            }
+        }
+        rx
     }
 
     /// Get the value associated with a key.
@@ -442,4 +470,26 @@ async fn test_db() {
         "Passing in an ID lower than should result in an error"
     );
     assert!(db.set_stream("s", "0-0", data).is_err());
+}
+
+#[tokio::test]
+async fn test_db_stream() {
+    let db = Db::new();
+
+    let rx = db.block_stream("stream".to_string());
+
+    let dbc = db.clone();
+    tokio::spawn(async move {
+        let senders = dbc.get_all_block("stream");
+        assert_eq!(1, senders.len());
+
+        senders
+            .into_iter()
+            .for_each(|sender| sender.send(RESP::SimpleString("1".to_string())).unwrap());
+    });
+
+    assert_eq!(Ok(RESP::SimpleString("1".to_string())), rx.await);
+
+    let senders = db.get_all_block("stream");
+    assert_eq!(0, senders.len());
 }

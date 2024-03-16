@@ -94,6 +94,29 @@ async fn handle_connection(
 
                 if let Some(duration) = xread.block() {
                     println!("block {}ms", duration.as_millis());
+                    if duration.as_millis() == 0 {
+                        for (key, _) in &pairs {
+                            let mut arr = Vec::new();
+                            arr.push(RESP::BulkString(Bytes::from(key.to_string())));
+
+                            let rx = db.block_stream(key.to_string());
+
+                            let stream = rx.await.unwrap();
+                            println!("recv stream: {:?}", stream);
+                            arr.push(RESP::Array(vec![stream]));
+
+                            streams.push(RESP::Array(arr));
+                        }
+
+                        writer
+                            .lock()
+                            .await
+                            .write_all(RESP::Array(streams).encode().as_bytes())
+                            .await
+                            .unwrap();
+
+                        continue;
+                    }
                     time::sleep(duration).await
                 }
 
@@ -245,9 +268,23 @@ async fn handle_connection(
                 }
 
                 let resp = match db.set_stream(xadd.key(), id.clone(), xadd.data()) {
-                    Ok(_) => RESP::BulkString(Bytes::from(id)),
+                    Ok(_) => RESP::BulkString(Bytes::from(id.clone())),
                     Err(e) => RESP::Error(e.to_string()),
                 };
+
+                let mut items = Vec::new();
+                items.push(RESP::BulkString(Bytes::from(id.to_string())));
+
+                let mut data_items = Vec::new();
+                xadd.data().iter().for_each(|(k, v)| {
+                    data_items.push(RESP::BulkString(Bytes::from(k.to_string())));
+                    data_items.push(RESP::BulkString(Bytes::from(v.to_string())));
+                });
+                items.push(RESP::Array(data_items));
+                let senders = db.get_all_block(xadd.key());
+                senders
+                    .into_iter()
+                    .for_each(|sender| sender.send(RESP::Array(items.clone())).unwrap());
 
                 writer
                     .lock()
