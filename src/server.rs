@@ -101,7 +101,7 @@ async fn handle_connection(
                     let mut arr = Vec::new();
                     arr.push(RESP::BulkString(Bytes::from(key.to_string())));
 
-                    let resp = match db.get_stream(key) {
+                    let arr = match db.get_stream(key) {
                         Some(stream) => {
                             let iter = stream.iter().filter(|(id, _)| {
                                 let t: TimeSepc = id.parse().unwrap();
@@ -123,13 +123,25 @@ async fn handle_connection(
                                 streams.push(RESP::Array(items));
                             });
 
-                            arr.push(RESP::Array(streams));
-                            RESP::Array(arr)
+                            if streams.is_empty() {
+                                arr.pop();
+                                arr
+                            } else {
+                                arr.push(RESP::Array(streams));
+                                arr
+                            }
                         }
-                        None => RESP::Array(arr),
+                        None => {
+                            // remove stream key in arr
+                            arr.pop();
+                            arr
+                        }
                     };
 
-                    streams.push(resp);
+                    if !arr.is_empty() {
+                        let resp = RESP::Array(arr);
+                        streams.push(resp);
+                    }
                 });
 
                 let resp = if streams.is_empty() {
