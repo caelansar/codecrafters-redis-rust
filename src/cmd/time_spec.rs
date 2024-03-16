@@ -19,6 +19,9 @@ impl FromStr for TimeSepc {
         if s == "+" {
             return Ok(TimeSepc::EndWildcard);
         }
+        if s == "$" {
+            return Ok(TimeSepc::EndWildcard);
+        }
         let parts = s.split_once('-');
         match parts {
             Some((ts, seq)) => {

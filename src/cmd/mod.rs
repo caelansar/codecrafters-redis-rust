@@ -171,6 +171,21 @@ mod tests {
             Testcase {
                 resp: RESP::Array(vec![
                     RESP::BulkString(Bytes::from("XREAD")),
+                    RESP::BulkString(Bytes::from("block")),
+                    RESP::BulkString(Bytes::from("1000")),
+                    RESP::BulkString(Bytes::from("streams")),
+                    RESP::BulkString(Bytes::from("stream_key")),
+                    RESP::BulkString(Bytes::from("$")),
+                ]),
+                cmd: Command::XRead(XRead::new(
+                    Some(Duration::from_millis(1000)),
+                    vec!["stream_key".into()],
+                    vec![TimeSepc::EndWildcard],
+                )),
+            },
+            Testcase {
+                resp: RESP::Array(vec![
+                    RESP::BulkString(Bytes::from("XREAD")),
                     RESP::BulkString(Bytes::from("streams")),
                     RESP::BulkString(Bytes::from("stream_key")),
                     RESP::BulkString(Bytes::from("stream_key_1")),
