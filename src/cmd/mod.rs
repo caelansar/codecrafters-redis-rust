@@ -147,7 +147,24 @@ mod tests {
                     RESP::BulkString(Bytes::from("stream_key")),
                     RESP::BulkString(Bytes::from("1-0")),
                 ]),
-                cmd: Command::XRead(XRead::new("stream_key", TimeSepc::Specified(1, 0))),
+                cmd: Command::XRead(XRead::new(
+                    vec!["stream_key".into()],
+                    vec![TimeSepc::Specified(1, 0)],
+                )),
+            },
+            Testcase {
+                resp: RESP::Array(vec![
+                    RESP::BulkString(Bytes::from("XREAD")),
+                    RESP::BulkString(Bytes::from("streams")),
+                    RESP::BulkString(Bytes::from("stream_key")),
+                    RESP::BulkString(Bytes::from("stream_key_1")),
+                    RESP::BulkString(Bytes::from("1-0")),
+                    RESP::BulkString(Bytes::from("2-0")),
+                ]),
+                cmd: Command::XRead(XRead::new(
+                    vec!["stream_key".into(), "stream_key_1".into()],
+                    vec![TimeSepc::Specified(1, 0), TimeSepc::Specified(2, 0)],
+                )),
             },
         ];
 

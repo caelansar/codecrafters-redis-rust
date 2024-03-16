@@ -87,42 +87,44 @@ async fn handle_connection(
                     .unwrap();
             }
             Command::XRead(xread) => {
-                let (key, start) = xread.key_and_start();
+                let pairs = xread.key_start_pairs();
 
                 let mut streams = Vec::new();
 
-                let mut arr = Vec::new();
-                arr.push(RESP::BulkString(Bytes::from(key.to_string())));
+                pairs.into_iter().for_each(|(key, start)| {
+                    let mut arr = Vec::new();
+                    arr.push(RESP::BulkString(Bytes::from(key.to_string())));
 
-                let resp = match db.get_stream(key) {
-                    Some(stream) => {
-                        let iter = stream.iter().filter(|(id, _)| {
-                            let t: TimeSepc = id.parse().unwrap();
-                            &t > start
-                        });
-
-                        let mut streams = Vec::new();
-
-                        iter.for_each(|(id, data)| {
-                            let mut items = Vec::new();
-                            items.push(RESP::BulkString(Bytes::from(id.to_string())));
-
-                            let mut data_items = Vec::new();
-                            data.iter().for_each(|(k, v)| {
-                                data_items.push(RESP::BulkString(Bytes::from(k.to_string())));
-                                data_items.push(RESP::BulkString(Bytes::from(v.to_string())));
+                    let resp = match db.get_stream(key) {
+                        Some(stream) => {
+                            let iter = stream.iter().filter(|(id, _)| {
+                                let t: TimeSepc = id.parse().unwrap();
+                                &t > start
                             });
-                            items.push(RESP::Array(data_items));
-                            streams.push(RESP::Array(items));
-                        });
 
-                        arr.push(RESP::Array(streams));
-                        RESP::Array(arr)
-                    }
-                    None => RESP::Array(arr),
-                };
+                            let mut streams = Vec::new();
 
-                streams.push(resp);
+                            iter.for_each(|(id, data)| {
+                                let mut items = Vec::new();
+                                items.push(RESP::BulkString(Bytes::from(id.to_string())));
+
+                                let mut data_items = Vec::new();
+                                data.iter().for_each(|(k, v)| {
+                                    data_items.push(RESP::BulkString(Bytes::from(k.to_string())));
+                                    data_items.push(RESP::BulkString(Bytes::from(v.to_string())));
+                                });
+                                items.push(RESP::Array(data_items));
+                                streams.push(RESP::Array(items));
+                            });
+
+                            arr.push(RESP::Array(streams));
+                            RESP::Array(arr)
+                        }
+                        None => RESP::Array(arr),
+                    };
+
+                    streams.push(resp);
+                });
 
                 writer
                     .lock()

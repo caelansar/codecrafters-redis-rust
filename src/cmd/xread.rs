@@ -5,20 +5,24 @@ use anyhow::bail;
 /// XREAD is used to read data from one or more streams, starting from a specified entry ID.
 #[derive(Debug, PartialEq)]
 pub struct XRead {
-    stream_key: String,
-    start: TimeSepc,
+    stream_keys: Vec<String>,
+    starts: Vec<TimeSepc>,
 }
 
 impl XRead {
-    pub fn new(stream_key: impl ToString, start: TimeSepc) -> Self {
+    pub fn new(stream_keys: Vec<String>, starts: Vec<TimeSepc>) -> Self {
         Self {
-            stream_key: stream_key.to_string(),
-            start,
+            stream_keys,
+            starts,
         }
     }
 
-    pub fn key_and_start(&self) -> (&str, &TimeSepc) {
-        (&self.stream_key, &self.start)
+    pub fn key_start_pairs(&self) -> Vec<(&str, &TimeSepc)> {
+        self.stream_keys
+            .iter()
+            .zip(self.starts.iter())
+            .map(|(key, start)| (key.as_str(), start))
+            .collect()
     }
 
     pub(crate) fn parse_frames(parse: &mut Parse) -> anyhow::Result<Self> {
@@ -26,11 +30,24 @@ impl XRead {
             bail!("expect to be streams")
         }
 
-        let stream_key = parse.next_string()?;
-        let start_str = parse.next_string()?;
+        let mut params = Vec::new();
+        while let Ok(d) = parse.next_string() {
+            params.push(d);
+        }
 
-        let start = start_str.parse()?;
+        let mut stream_keys = Vec::new();
+        let mut starts = Vec::new();
 
-        Ok(Self::new(stream_key, start))
+        let mid = params.len() / 2;
+
+        params.iter().take(mid).for_each(|key| {
+            stream_keys.push(key.to_string());
+        });
+        params
+            .iter()
+            .skip(mid)
+            .for_each(|start| starts.push(start.parse().unwrap()));
+
+        Ok(Self::new(stream_keys, starts))
     }
 }
