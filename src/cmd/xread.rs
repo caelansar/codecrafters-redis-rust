@@ -1,20 +1,27 @@
 use crate::cmd::time_spec::TimeSepc;
 use crate::parse::Parse;
 use anyhow::bail;
+use std::time::Duration;
 
 /// XREAD is used to read data from one or more streams, starting from a specified entry ID.
 #[derive(Debug, PartialEq)]
 pub struct XRead {
+    block: Option<Duration>,
     stream_keys: Vec<String>,
     starts: Vec<TimeSepc>,
 }
 
 impl XRead {
-    pub fn new(stream_keys: Vec<String>, starts: Vec<TimeSepc>) -> Self {
+    pub fn new(block: Option<Duration>, stream_keys: Vec<String>, starts: Vec<TimeSepc>) -> Self {
         Self {
+            block,
             stream_keys,
             starts,
         }
+    }
+
+    pub fn block(&self) -> Option<Duration> {
+        self.block
     }
 
     pub fn key_start_pairs(&self) -> Vec<(&str, &TimeSepc)> {
@@ -26,8 +33,17 @@ impl XRead {
     }
 
     pub(crate) fn parse_frames(parse: &mut Parse) -> anyhow::Result<Self> {
-        if parse.next_string()? != "streams" {
-            bail!("expect to be streams")
+        let mut duration = None;
+
+        loop {
+            match parse.next_string()?.as_str() {
+                "streams" => break,
+                "block" => {
+                    let ms = parse.next_int()?;
+                    duration = Some(Duration::from_millis(ms))
+                }
+                arg => bail!("unexpect arg: {}", arg),
+            }
         }
 
         let mut params = Vec::new();
@@ -48,6 +64,6 @@ impl XRead {
             .skip(mid)
             .for_each(|start| starts.push(start.parse().unwrap()));
 
-        Ok(Self::new(stream_keys, starts))
+        Ok(Self::new(duration, stream_keys, starts))
     }
 }

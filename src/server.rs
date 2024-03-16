@@ -21,6 +21,7 @@ use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc::Sender;
 use tokio::sync::{mpsc, Mutex};
+use tokio::time;
 use tokio::time::Instant;
 
 pub fn decode_hex(s: &str) -> Result<Vec<u8>, ParseIntError> {
@@ -91,6 +92,11 @@ async fn handle_connection(
 
                 let mut streams = Vec::new();
 
+                if let Some(duration) = xread.block() {
+                    println!("block {}ms", duration.as_millis());
+                    time::sleep(duration).await
+                }
+
                 pairs.into_iter().for_each(|(key, start)| {
                     let mut arr = Vec::new();
                     arr.push(RESP::BulkString(Bytes::from(key.to_string())));
@@ -126,10 +132,16 @@ async fn handle_connection(
                     streams.push(resp);
                 });
 
+                let resp = if streams.is_empty() {
+                    RESP::Null
+                } else {
+                    RESP::Array(streams)
+                };
+
                 writer
                     .lock()
                     .await
-                    .write_all(RESP::Array(streams).encode().as_bytes())
+                    .write_all(resp.encode().as_bytes())
                     .await
                     .unwrap();
             }
