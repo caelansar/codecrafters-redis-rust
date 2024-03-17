@@ -126,7 +126,7 @@ async fn handle_connection(
 
                     let arr = match db.get_stream(key) {
                         Some(stream) => {
-                            let iter = stream.iter().filter(|(id, _)| {
+                            let iter = stream.into_iter().filter(|(id, _)| {
                                 let t: TimeSepc = id.parse().unwrap();
                                 &t > start
                             });
@@ -137,12 +137,7 @@ async fn handle_connection(
                                 let mut items = Vec::new();
                                 items.push(RESP::BulkString(Bytes::from(id.to_string())));
 
-                                let mut data_items = Vec::new();
-                                data.iter().for_each(|(k, v)| {
-                                    data_items.push(RESP::BulkString(Bytes::from(k.to_string())));
-                                    data_items.push(RESP::BulkString(Bytes::from(v.to_string())));
-                                });
-                                items.push(RESP::Array(data_items));
+                                items.push(data.into());
                                 streams.push(RESP::Array(items));
                             });
 
@@ -181,12 +176,14 @@ async fn handle_connection(
                     .unwrap();
             }
             Command::XRange(xrange) => {
+                use std::ops::RangeBounds;
+
                 let key = xrange.key();
 
                 let mut arr = Vec::new();
                 let resp = match db.get_stream(key) {
                     Some(stream) => {
-                        let iter = stream.iter().filter(|(id, _)| {
+                        let iter = stream.into_iter().filter(|(id, _)| {
                             let t = id.parse().unwrap();
                             xrange.range().contains(&t)
                         });
@@ -194,12 +191,7 @@ async fn handle_connection(
                             let mut items = Vec::new();
                             items.push(RESP::BulkString(Bytes::from(id.to_string())));
 
-                            let mut data_items = Vec::new();
-                            data.iter().for_each(|(k, v)| {
-                                data_items.push(RESP::BulkString(Bytes::from(k.to_string())));
-                                data_items.push(RESP::BulkString(Bytes::from(v.to_string())));
-                            });
-                            items.push(RESP::Array(data_items));
+                            items.push(data.into());
                             arr.push(RESP::Array(items));
                         });
 
@@ -275,12 +267,7 @@ async fn handle_connection(
                 let mut items = Vec::new();
                 items.push(RESP::BulkString(Bytes::from(id.to_string())));
 
-                let mut data_items = Vec::new();
-                xadd.data().iter().for_each(|(k, v)| {
-                    data_items.push(RESP::BulkString(Bytes::from(k.to_string())));
-                    data_items.push(RESP::BulkString(Bytes::from(v.to_string())));
-                });
-                items.push(RESP::Array(data_items));
+                items.push(xadd.data().into());
                 let senders = db.get_all_block(xadd.key());
                 senders
                     .into_iter()

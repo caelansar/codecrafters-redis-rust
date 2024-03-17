@@ -1,14 +1,29 @@
 use crate::parse::Parse;
+use crate::protocol::RESP;
+use bytes::Bytes;
 
 #[derive(Debug, PartialOrd, PartialEq)]
 pub struct Xadd {
     stream_key: String,
     stream_id: String,
-    data: Vec<(String, String)>,
+    data: StreamData,
+}
+
+pub type StreamData = Vec<(String, String)>;
+
+impl From<StreamData> for RESP {
+    fn from(value: StreamData) -> Self {
+        let mut arr = Vec::new();
+        value.into_iter().for_each(|(k, v)| {
+            arr.push(RESP::BulkString(Bytes::from(k)));
+            arr.push(RESP::BulkString(Bytes::from(v)));
+        });
+        RESP::Array(arr)
+    }
 }
 
 impl Xadd {
-    pub fn new(key: impl ToString, id: impl ToString, data: Vec<(String, String)>) -> Self {
+    pub fn new(key: impl ToString, id: impl ToString, data: StreamData) -> Self {
         Self {
             stream_key: key.to_string(),
             stream_id: id.to_string(),
@@ -20,7 +35,7 @@ impl Xadd {
         &self.stream_key
     }
 
-    pub fn data(&self) -> Vec<(String, String)> {
+    pub fn data(&self) -> StreamData {
         self.data.clone()
     }
 

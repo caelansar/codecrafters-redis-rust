@@ -28,7 +28,7 @@ impl XRange {
         &self.stream_key
     }
 
-    pub fn range(&self) -> ops::RangeInclusive<TimeSepc> {
+    pub fn range(&self) -> impl ops::RangeBounds<TimeSepc> {
         self.start.clone()..=self.end.clone()
     }
 

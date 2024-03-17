@@ -1,6 +1,7 @@
 use crate::protocol::RESP;
 use bytes::Bytes;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::mem;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::oneshot::{channel, Receiver, Sender};
@@ -105,7 +106,7 @@ impl Db {
     pub(crate) fn get_all_block(&self, key: impl AsRef<str>) -> Vec<Sender<RESP>> {
         let mut state = self.shared.state.lock().unwrap();
         match state.block_stream.get_mut(key.as_ref()) {
-            Some(senders) => senders.drain(..).collect(),
+            Some(senders) => mem::take(senders),
             None => vec![],
         }
     }
