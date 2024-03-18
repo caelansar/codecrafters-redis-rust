@@ -54,7 +54,7 @@ impl Command {
             _ => Command::Raw(resp),
         };
 
-        if !matches!(command, Command::Raw(_) | Command::Xadd(_)) {
+        if !matches!(command, Command::Raw(_)) {
             parse.finish()?;
         }
 
