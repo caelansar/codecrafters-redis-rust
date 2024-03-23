@@ -134,10 +134,7 @@ async fn handle_connection(
                             let mut streams = Vec::new();
 
                             iter.for_each(|(id, data)| {
-                                let items = vec![
-                                    RESP::BulkString(Bytes::from(id.to_string())),
-                                    data.into(),
-                                ];
+                                let items = vec![RESP::BulkString(Bytes::from(id)), data.into()];
                                 streams.push(RESP::Array(items));
                             });
 
@@ -188,8 +185,7 @@ async fn handle_connection(
                             xrange.range().contains(&t)
                         });
                         iter.for_each(|(id, data)| {
-                            let items =
-                                vec![RESP::BulkString(Bytes::from(id.to_string())), data.into()];
+                            let items = vec![RESP::BulkString(Bytes::from(id)), data.into()];
                             arr.push(RESP::Array(items));
                         });
 
@@ -262,14 +258,10 @@ async fn handle_connection(
                     Err(e) => RESP::Error(e.to_string()),
                 };
 
-                let items = vec![
-                    RESP::BulkString(Bytes::from(id.to_string())),
-                    xadd.data().into(),
-                ];
                 let senders = db.get_all_block(xadd.key());
                 senders
                     .into_iter()
-                    .for_each(|sender| sender.send(RESP::Array(items.clone())).unwrap());
+                    .for_each(|sender| sender.send(RESP::Array(xadd.to_item())).unwrap());
 
                 writer
                     .lock()

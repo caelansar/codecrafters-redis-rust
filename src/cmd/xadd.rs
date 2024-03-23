@@ -43,6 +43,13 @@ impl Xadd {
         &self.stream_id
     }
 
+    pub fn to_item(&self) -> Vec<RESP> {
+        vec![
+            RESP::BulkString(Bytes::from(self.id().to_string())),
+            self.data().into(),
+        ]
+    }
+
     pub(crate) fn parse_frames(parse: &mut Parse) -> anyhow::Result<Self> {
         let stream_key = parse.next_string()?;
 
