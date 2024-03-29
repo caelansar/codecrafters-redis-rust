@@ -5,6 +5,7 @@ pub struct Keys {
     pattern: String,
 }
 
+#[allow(unused)]
 impl Keys {
     pub fn new(pattern: impl ToString) -> Keys {
         Keys {
@@ -12,7 +13,7 @@ impl Keys {
         }
     }
 
-    pub fn message(&self) -> &str {
+    pub fn pattern(&self) -> &str {
         &self.pattern
     }
 

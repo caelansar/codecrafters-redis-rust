@@ -66,7 +66,8 @@ async fn handle_connection(
             }
             Command::Keys(keys) => {
                 // TODO: get keys by pattern
-                let _ = keys;
+                let pattern = keys.pattern();
+                assert_eq!("*", pattern);
 
                 let resp = RESP::Array(db.keys());
 
