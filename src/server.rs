@@ -88,6 +88,21 @@ async fn handle_connection(
                     .await
                     .unwrap();
             }
+            Command::Publish(publish) => {
+                let num_subscribers = db.publish(&publish.channel, publish.message);
+
+                // The number of subscribers is returned as the response to the publish
+                // request.
+                let resp = RESP::Integer(num_subscribers as i64);
+
+                // Write the frame to the client.
+                writer
+                    .lock()
+                    .await
+                    .write_all(resp.encode().as_bytes())
+                    .await
+                    .unwrap();
+            }
             Command::XRead(xread) => {
                 let pairs = xread.key_start_pairs();
 

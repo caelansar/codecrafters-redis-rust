@@ -1,12 +1,13 @@
-use crate::cmd::echo::Echo;
-use crate::cmd::get::Get;
-use crate::cmd::keys::Keys;
-use crate::cmd::ping::Ping;
-use crate::cmd::r#type::Type;
-use crate::cmd::set::Set;
-use crate::cmd::xadd::Xadd;
-use crate::cmd::xrange::XRange;
-use crate::cmd::xread::XRead;
+use self::echo::Echo;
+use self::get::Get;
+use self::keys::Keys;
+use self::ping::Ping;
+use self::publish::Publish;
+use self::r#type::Type;
+use self::set::Set;
+use self::xadd::Xadd;
+use self::xrange::XRange;
+use self::xread::XRead;
 use crate::parse::Parse;
 use crate::protocol::RESP;
 
@@ -14,6 +15,7 @@ mod echo;
 mod get;
 mod keys;
 mod ping;
+mod publish;
 mod set;
 pub mod time_spec;
 mod r#type;
@@ -32,6 +34,7 @@ pub enum Command {
     Xadd(Xadd),
     XRange(XRange),
     XRead(XRead),
+    Publish(Publish),
     Raw(RESP),
 }
 
@@ -51,6 +54,7 @@ impl Command {
             "xadd" => Command::Xadd(Xadd::parse_frames(&mut parse)?),
             "xrange" => Command::XRange(XRange::parse_frames(&mut parse)?),
             "xread" => Command::XRead(XRead::parse_frames(&mut parse)?),
+            "publish" => Command::Publish(Publish::parse_frames(&mut parse)?),
             _ => Command::Raw(resp),
         };
 
@@ -197,6 +201,14 @@ mod tests {
                     vec!["stream_key".into(), "stream_key_1".into()],
                     vec![TimeSepc::Specified(1, 0), TimeSepc::Specified(2, 0)],
                 )),
+            },
+            Testcase {
+                resp: RESP::Array(vec![
+                    RESP::BulkString(Bytes::from("PUBLISH")),
+                    RESP::BulkString(Bytes::from("channel")),
+                    RESP::BulkString(Bytes::from("hello")),
+                ]),
+                cmd: Command::Publish(Publish::new("channel", Bytes::from("hello"))),
             },
         ];
 
