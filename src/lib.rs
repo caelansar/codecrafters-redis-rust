@@ -1,6 +1,6 @@
 mod cmd;
 mod connection;
-mod parse;
+pub mod parse;
 mod protocol;
 mod rdb;
 pub mod server;

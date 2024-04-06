@@ -5,9 +5,11 @@ use self::ping::Ping;
 use self::publish::Publish;
 use self::r#type::Type;
 use self::set::Set;
+use self::subscribe::Subscribe;
 use self::xadd::Xadd;
 use self::xrange::XRange;
 use self::xread::XRead;
+use crate::cmd::unsubscribe::Unsubscribe;
 use crate::parse::Parse;
 use crate::protocol::RESP;
 
@@ -17,8 +19,10 @@ mod keys;
 mod ping;
 mod publish;
 mod set;
+mod subscribe;
 pub mod time_spec;
 mod r#type;
+mod unsubscribe;
 mod xadd;
 mod xrange;
 mod xread;
@@ -35,6 +39,8 @@ pub enum Command {
     XRange(XRange),
     XRead(XRead),
     Publish(Publish),
+    Subscribe(Subscribe),
+    Unsubscribe(Unsubscribe),
     Raw(RESP),
 }
 
@@ -55,6 +61,8 @@ impl Command {
             "xrange" => Command::XRange(XRange::parse_frames(&mut parse)?),
             "xread" => Command::XRead(XRead::parse_frames(&mut parse)?),
             "publish" => Command::Publish(Publish::parse_frames(&mut parse)?),
+            "subscribe" => Command::Subscribe(Subscribe::parse_frames(&mut parse)?),
+            "unsubscribe" => Command::Unsubscribe(Unsubscribe::parse_frames(&mut parse)?),
             _ => Command::Raw(resp),
         };
 

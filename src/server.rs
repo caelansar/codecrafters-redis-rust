@@ -21,8 +21,9 @@ use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc::Sender;
 use tokio::sync::{mpsc, Mutex};
-use tokio::time;
 use tokio::time::Instant;
+use tokio::{select, time};
+use tokio_stream::{StreamExt, StreamMap};
 
 pub fn decode_hex(s: &str) -> Result<Vec<u8>, ParseIntError> {
     (0..s.len())
@@ -88,6 +89,11 @@ async fn handle_connection(
                     .await
                     .unwrap();
             }
+            Command::Subscribe(mut subscribe) => subscribe
+                .apply(&db, &mut conn, writer.clone())
+                .await
+                .unwrap(),
+            Command::Unsubscribe(_) => unreachable!(),
             Command::Publish(publish) => {
                 let num_subscribers = db.publish(&publish.channel, publish.message);
 
