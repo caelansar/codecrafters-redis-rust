@@ -1,6 +1,7 @@
-use crate::{parse::Parse, storage::Db};
-
+use crate::{parse::Parse, protocol::RESP, storage::Db};
 use bytes::Bytes;
+use std::sync::Arc;
+use tokio::{io::AsyncWriteExt, net::tcp::OwnedWriteHalf, sync::Mutex};
 
 /// Posts a message to the given channel.
 ///
@@ -12,10 +13,10 @@ use bytes::Bytes;
 #[derive(Debug, PartialEq)]
 pub struct Publish {
     /// Name of the channel on which the message should be published.
-    pub channel: String,
+    channel: String,
 
     /// The message to publish.
-    pub message: Bytes,
+    message: Bytes,
 }
 
 impl Publish {
@@ -39,5 +40,22 @@ impl Publish {
         let message = parse.next_bytes()?;
 
         Ok(Publish { channel, message })
+    }
+
+    pub(crate) async fn apply(
+        mut self,
+        db: &Db,
+        dst: Arc<Mutex<OwnedWriteHalf>>,
+    ) -> anyhow::Result<()> {
+        let num_subscribers = db.publish(&self.channel, self.message);
+
+        // The number of subscribers is returned as the response to the publish
+        // request.
+        let resp = RESP::Integer(num_subscribers as i64);
+
+        // Write the frame to the client.
+        dst.lock().await.write_all(resp.encode().as_bytes()).await?;
+
+        Ok(())
     }
 }

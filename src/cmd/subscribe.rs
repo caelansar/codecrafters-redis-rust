@@ -20,7 +20,7 @@ use tokio_stream::{Stream, StreamExt, StreamMap};
 /// PUNSUBSCRIBE, PING and QUIT commands.
 #[derive(Debug, PartialEq)]
 pub struct Subscribe {
-    pub channels: Vec<String>,
+    channels: Vec<String>,
 }
 /// Stream of messages. The stream receives messages from the
 /// `broadcast::Receiver`. We use `stream!` to create a `Stream` that consumes
