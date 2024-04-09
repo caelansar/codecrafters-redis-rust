@@ -1,4 +1,9 @@
-use crate::parse::{Parse, ParseError};
+use crate::{
+    parse::{Parse, ParseError},
+    protocol::RESP,
+};
+use std::sync::Arc;
+use tokio::{io::AsyncWriteExt, net::tcp::OwnedWriteHalf, sync::Mutex};
 
 /// Returns PONG if no argument is provided, otherwise return a copy
 /// of the argument as a bulk.
@@ -10,10 +15,6 @@ pub struct Ping {
 impl Ping {
     pub fn new() -> Ping {
         Ping { message: None }
-    }
-
-    pub fn message(&self) -> Option<&String> {
-        self.message.as_ref()
     }
 
     pub(crate) fn parse_frames(parse: &mut Parse) -> anyhow::Result<Ping> {
@@ -32,5 +33,13 @@ impl Ping {
         }
 
         Ok(Ping { message })
+    }
+
+    pub(crate) async fn apply(self, dst: Arc<Mutex<OwnedWriteHalf>>) -> anyhow::Result<()> {
+        let resp = RESP::SimpleString(self.message.map_or("PONG".into(), |x| x.clone()));
+
+        dst.lock().await.write_all(resp.encode().as_bytes()).await?;
+
+        Ok(())
     }
 }

@@ -43,7 +43,7 @@ impl Publish {
     }
 
     pub(crate) async fn apply(
-        mut self,
+        self,
         db: &Db,
         dst: Arc<Mutex<OwnedWriteHalf>>,
     ) -> anyhow::Result<()> {

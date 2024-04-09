@@ -78,16 +78,7 @@ async fn handle_connection(
                     .await
                     .unwrap();
             }
-            Command::Ping(ping) => {
-                let resp = RESP::SimpleString(ping.message().map_or("PONG".into(), |x| x.clone()));
-
-                writer
-                    .lock()
-                    .await
-                    .write_all(resp.encode().as_bytes())
-                    .await
-                    .unwrap();
-            }
+            Command::Ping(ping) => ping.apply(writer.clone()).await.unwrap(),
             Command::Subscribe(subscribe) => subscribe
                 .apply(&db, &mut conn, writer.clone())
                 .await
