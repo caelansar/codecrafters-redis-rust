@@ -55,29 +55,8 @@ async fn handle_connection(
 
         let cmd = Command::from_resp_frame(resp).unwrap();
         match cmd {
-            Command::Echo(echo) => {
-                let resp = RESP::BulkString(echo.message());
-                writer
-                    .lock()
-                    .await
-                    .write_all(resp.encode().as_bytes())
-                    .await
-                    .unwrap();
-            }
-            Command::Keys(keys) => {
-                // TODO: get keys by pattern
-                let pattern = keys.pattern();
-                assert_eq!("*", pattern);
-
-                let resp = RESP::Array(db.keys());
-
-                writer
-                    .lock()
-                    .await
-                    .write_all(resp.encode().as_bytes())
-                    .await
-                    .unwrap();
-            }
+            Command::Echo(echo) => echo.apply(writer.clone()).await.unwrap(),
+            Command::Keys(keys) => keys.apply(&db, writer.clone()).await.unwrap(),
             Command::Ping(ping) => ping.apply(writer.clone()).await.unwrap(),
             Command::Subscribe(subscribe) => subscribe
                 .apply(&db, &mut conn, writer.clone())
