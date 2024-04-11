@@ -215,7 +215,7 @@ async fn handle_command(
                     .unwrap();
             }
         }
-        command => {
+        _ => {
             unreachable!()
         }
     }

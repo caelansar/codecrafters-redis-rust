@@ -1,4 +1,8 @@
-use crate::parse::Parse;
+use std::sync::Arc;
+
+use tokio::{io::AsyncWriteExt, net::tcp::OwnedWriteHalf, sync::Mutex};
+
+use crate::{parse::Parse, protocol::RESP, storage::Db};
 
 /// Get the value of key.
 ///
@@ -51,5 +55,19 @@ impl Get {
         let key = parse.next_string()?;
 
         Ok(Get { key })
+    }
+
+    pub(crate) async fn apply(
+        &self,
+        db: &Db,
+        dst: Arc<Mutex<OwnedWriteHalf>>,
+    ) -> anyhow::Result<()> {
+        let resp = match db.get(&self.key) {
+            Some(e) => RESP::BulkString(e),
+            None => RESP::Null,
+        };
+        dst.lock().await.write_all(resp.encode().as_bytes()).await?;
+
+        Ok(())
     }
 }

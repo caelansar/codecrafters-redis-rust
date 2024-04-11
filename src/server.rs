@@ -270,16 +270,7 @@ async fn handle_connection(
                 // block command to let it propagate to replicas
                 tokio::time::sleep(Duration::from_millis(20)).await;
 
-                let resp = match db.get(get.key()) {
-                    Some(e) => RESP::BulkString(e),
-                    None => RESP::Null,
-                };
-                writer
-                    .lock()
-                    .await
-                    .write_all(resp.encode().as_bytes())
-                    .await
-                    .unwrap();
+                get.apply(&db, writer.clone()).await.unwrap();
             }
             Command::Set(set) => {
                 // master node, propagate SET command
