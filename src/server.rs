@@ -247,24 +247,7 @@ async fn handle_connection(
                     .await
                     .unwrap();
             }
-            Command::Type(typ) => {
-                let resp = match db.get(typ.key()) {
-                    Some(_) => RESP::SimpleString("string".to_string()),
-                    None => {
-                        if db.get_stream(typ.key()).is_some() {
-                            RESP::SimpleString("stream".to_string())
-                        } else {
-                            RESP::SimpleString("none".to_string())
-                        }
-                    }
-                };
-                writer
-                    .lock()
-                    .await
-                    .write_all(resp.encode().as_bytes())
-                    .await
-                    .unwrap();
-            }
+            Command::Type(typ) => typ.apply(&db, writer.clone()).await.unwrap(),
             Command::Get(get) => {
                 // TODO: remove
                 // block command to let it propagate to replicas
