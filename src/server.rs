@@ -149,35 +149,7 @@ async fn handle_connection(
                     .await
                     .unwrap();
             }
-            Command::XRange(xrange) => {
-                use std::ops::RangeBounds;
-
-                let key = xrange.key();
-
-                let mut arr = Vec::new();
-                let resp = match db.get_stream(key) {
-                    Some(stream) => {
-                        let iter = stream.into_iter().filter(|(id, _)| {
-                            let t = id.parse().unwrap();
-                            xrange.range().contains(&t)
-                        });
-                        iter.for_each(|(id, data)| {
-                            let items = vec![RESP::BulkString(Bytes::from(id)), data.into()];
-                            arr.push(RESP::Array(items));
-                        });
-
-                        RESP::Array(arr)
-                    }
-                    None => RESP::Array(arr),
-                };
-
-                writer
-                    .lock()
-                    .await
-                    .write_all(resp.encode().as_bytes())
-                    .await
-                    .unwrap();
-            }
+            Command::XRange(xrange) => xrange.apply(&db, writer.clone()).await.unwrap(),
             Command::Xadd(xadd) => {
                 let mut id = xadd.id().to_string();
 

@@ -1,6 +1,14 @@
+use bytes::Bytes;
+use tokio::io::AsyncWriteExt;
+use tokio::net::tcp::OwnedWriteHalf;
+use tokio::sync::Mutex;
+
 use crate::cmd::time_spec::TimeSepc;
 use crate::parse::Parse;
+use crate::protocol::RESP;
+use crate::storage::Db;
 use std::ops;
+use std::sync::Arc;
 
 /// The XRANGE command retrieves a range of entries from a stream.
 /// It takes two arguments: start and end. Both are entry IDs. The
@@ -24,11 +32,7 @@ impl XRange {
         }
     }
 
-    pub fn key(&self) -> &str {
-        &self.stream_key
-    }
-
-    pub fn range(&self) -> impl ops::RangeBounds<TimeSepc> {
+    fn range(&self) -> impl ops::RangeBounds<TimeSepc> {
         self.start.clone()..=self.end.clone()
     }
 
@@ -42,5 +46,34 @@ impl XRange {
         let end = end_str.parse()?;
 
         Ok(Self::new(stream_key, start, end))
+    }
+
+    pub(crate) async fn apply(
+        &self,
+        db: &Db,
+        dst: Arc<Mutex<OwnedWriteHalf>>,
+    ) -> anyhow::Result<()> {
+        use std::ops::RangeBounds;
+
+        let mut arr = Vec::new();
+        let resp = match db.get_stream(&self.stream_key) {
+            Some(stream) => {
+                let iter = stream.into_iter().filter(|(id, _)| {
+                    let t = id.parse().unwrap();
+                    self.range().contains(&t)
+                });
+                iter.for_each(|(id, data)| {
+                    let items = vec![RESP::BulkString(Bytes::from(id)), data.into()];
+                    arr.push(RESP::Array(items));
+                });
+
+                RESP::Array(arr)
+            }
+            None => RESP::Array(arr),
+        };
+
+        dst.lock().await.write_all(resp.encode().as_bytes()).await?;
+
+        Ok(())
     }
 }
