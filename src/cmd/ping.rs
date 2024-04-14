@@ -2,8 +2,7 @@ use crate::{
     parse::{Parse, ParseError},
     protocol::RESP,
 };
-use std::sync::Arc;
-use tokio::{io::AsyncWriteExt, net::tcp::OwnedWriteHalf, sync::Mutex};
+use tokio::{io::AsyncWriteExt, net::tcp::OwnedWriteHalf, sync::MutexGuard};
 
 /// Returns PONG if no argument is provided, otherwise return a copy
 /// of the argument as a bulk.
@@ -35,10 +34,10 @@ impl Ping {
         Ok(Ping { message })
     }
 
-    pub(crate) async fn apply(self, dst: Arc<Mutex<OwnedWriteHalf>>) -> anyhow::Result<()> {
+    pub(crate) async fn apply(self, mut dst: MutexGuard<'_, OwnedWriteHalf>) -> anyhow::Result<()> {
         let resp = RESP::SimpleString(self.message.map_or("PONG".into(), |x| x.clone()));
 
-        dst.lock().await.write_all(resp.encode().as_bytes()).await?;
+        dst.write_all(resp.encode().as_bytes()).await?;
 
         Ok(())
     }

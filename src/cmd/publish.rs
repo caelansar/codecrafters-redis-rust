@@ -1,7 +1,6 @@
 use crate::{parse::Parse, protocol::RESP, storage::Db};
 use bytes::Bytes;
-use std::sync::Arc;
-use tokio::{io::AsyncWriteExt, net::tcp::OwnedWriteHalf, sync::Mutex};
+use tokio::{io::AsyncWriteExt, net::tcp::OwnedWriteHalf, sync::MutexGuard};
 
 /// Posts a message to the given channel.
 ///
@@ -45,7 +44,7 @@ impl Publish {
     pub(crate) async fn apply(
         self,
         db: &Db,
-        dst: Arc<Mutex<OwnedWriteHalf>>,
+        mut dst: MutexGuard<'_, OwnedWriteHalf>,
     ) -> anyhow::Result<()> {
         let num_subscribers = db.publish(&self.channel, self.message);
 
@@ -54,7 +53,7 @@ impl Publish {
         let resp = RESP::Integer(num_subscribers as i64);
 
         // Write the frame to the client.
-        dst.lock().await.write_all(resp.encode().as_bytes()).await?;
+        dst.write_all(resp.encode().as_bytes()).await?;
 
         Ok(())
     }

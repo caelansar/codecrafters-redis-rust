@@ -1,14 +1,13 @@
 use bytes::Bytes;
 use tokio::io::AsyncWriteExt;
 use tokio::net::tcp::OwnedWriteHalf;
-use tokio::sync::Mutex;
+use tokio::sync::MutexGuard;
 
 use crate::cmd::time_spec::TimeSepc;
 use crate::parse::Parse;
 use crate::protocol::RESP;
 use crate::storage::Db;
 use std::ops;
-use std::sync::Arc;
 
 /// The XRANGE command retrieves a range of entries from a stream.
 /// It takes two arguments: start and end. Both are entry IDs. The
@@ -51,7 +50,7 @@ impl XRange {
     pub(crate) async fn apply(
         &self,
         db: &Db,
-        dst: Arc<Mutex<OwnedWriteHalf>>,
+        mut dst: MutexGuard<'_, OwnedWriteHalf>,
     ) -> anyhow::Result<()> {
         use std::ops::RangeBounds;
 
@@ -72,7 +71,7 @@ impl XRange {
             None => RESP::Array(arr),
         };
 
-        dst.lock().await.write_all(resp.encode().as_bytes()).await?;
+        dst.write_all(resp.encode().as_bytes()).await?;
 
         Ok(())
     }

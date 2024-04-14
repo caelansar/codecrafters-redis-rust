@@ -1,6 +1,4 @@
-use std::sync::Arc;
-
-use tokio::{io::AsyncWriteExt, net::tcp::OwnedWriteHalf, sync::Mutex};
+use tokio::{io::AsyncWriteExt, net::tcp::OwnedWriteHalf, sync::MutexGuard};
 
 use crate::{parse::Parse, protocol::RESP, storage::Db};
 
@@ -25,7 +23,7 @@ impl Type {
     pub(crate) async fn apply(
         &self,
         db: &Db,
-        dst: Arc<Mutex<OwnedWriteHalf>>,
+        mut dst: MutexGuard<'_, OwnedWriteHalf>,
     ) -> anyhow::Result<()> {
         let resp = match db.get(&self.key) {
             Some(_) => RESP::SimpleString("string".to_string()),
@@ -37,7 +35,7 @@ impl Type {
                 }
             }
         };
-        dst.lock().await.write_all(resp.encode().as_bytes()).await?;
+        dst.write_all(resp.encode().as_bytes()).await?;
 
         Ok(())
     }

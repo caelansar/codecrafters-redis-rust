@@ -55,15 +55,15 @@ async fn handle_connection(
 
         let cmd = Command::from_resp_frame(resp).unwrap();
         match cmd {
-            Command::Echo(echo) => echo.apply(writer.clone()).await.unwrap(),
-            Command::Keys(keys) => keys.apply(&db, writer.clone()).await.unwrap(),
-            Command::Ping(ping) => ping.apply(writer.clone()).await.unwrap(),
+            Command::Echo(echo) => echo.apply(writer.lock().await).await.unwrap(),
+            Command::Keys(keys) => keys.apply(&db, writer.lock().await).await.unwrap(),
+            Command::Ping(ping) => ping.apply(writer.lock().await).await.unwrap(),
             Command::Subscribe(subscribe) => subscribe
                 .apply(&db, &mut conn, writer.clone())
                 .await
                 .unwrap(),
             Command::Unsubscribe(_) => unreachable!(),
-            Command::Publish(publish) => publish.apply(&db, writer.clone()).await.unwrap(),
+            Command::Publish(publish) => publish.apply(&db, writer.lock().await).await.unwrap(),
             Command::XRead(xread) => {
                 let pairs = xread.key_start_pairs();
 
@@ -149,7 +149,7 @@ async fn handle_connection(
                     .await
                     .unwrap();
             }
-            Command::XRange(xrange) => xrange.apply(&db, writer.clone()).await.unwrap(),
+            Command::XRange(xrange) => xrange.apply(&db, writer.lock().await).await.unwrap(),
             Command::Xadd(xadd) => {
                 let mut id = xadd.id().to_string();
 
@@ -219,13 +219,13 @@ async fn handle_connection(
                     .await
                     .unwrap();
             }
-            Command::Type(typ) => typ.apply(&db, writer.clone()).await.unwrap(),
+            Command::Type(typ) => typ.apply(&db, writer.lock().await).await.unwrap(),
             Command::Get(get) => {
                 // TODO: remove
                 // block command to let it propagate to replicas
                 tokio::time::sleep(Duration::from_millis(20)).await;
 
-                get.apply(&db, writer.clone()).await.unwrap();
+                get.apply(&db, writer.lock().await).await.unwrap();
             }
             Command::Set(set) => {
                 // master node, propagate SET command

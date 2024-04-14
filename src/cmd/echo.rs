@@ -1,8 +1,6 @@
-use std::sync::Arc;
-
 use crate::{parse::Parse, protocol::RESP};
 use bytes::Bytes;
-use tokio::{io::AsyncWriteExt, net::tcp::OwnedWriteHalf, sync::Mutex};
+use tokio::{io::AsyncWriteExt, net::tcp::OwnedWriteHalf, sync::MutexGuard};
 
 #[derive(Debug, PartialOrd, PartialEq)]
 pub struct Echo {
@@ -20,14 +18,13 @@ impl Echo {
         Ok(Echo { message })
     }
 
-    pub(crate) async fn apply(&self, dst: Arc<Mutex<OwnedWriteHalf>>) -> anyhow::Result<()> {
+    pub(crate) async fn apply(
+        &self,
+        mut dst: MutexGuard<'_, OwnedWriteHalf>,
+    ) -> anyhow::Result<()> {
         let resp = RESP::BulkString(self.message.clone());
 
-        dst.lock()
-            .await
-            .write_all(resp.encode().as_bytes())
-            .await
-            .unwrap();
+        dst.write_all(resp.encode().as_bytes()).await.unwrap();
 
         Ok(())
     }

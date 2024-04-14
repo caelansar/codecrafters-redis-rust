@@ -1,6 +1,5 @@
 use crate::{parse::Parse, protocol::RESP, storage::Db};
-use std::sync::Arc;
-use tokio::{io::AsyncWriteExt, net::tcp::OwnedWriteHalf, sync::Mutex};
+use tokio::{io::AsyncWriteExt, net::tcp::OwnedWriteHalf, sync::MutexGuard};
 
 #[derive(Debug, PartialOrd, PartialEq)]
 pub struct Keys {
@@ -24,7 +23,7 @@ impl Keys {
     pub(crate) async fn apply(
         &self,
         db: &Db,
-        dst: Arc<Mutex<OwnedWriteHalf>>,
+        mut dst: MutexGuard<'_, OwnedWriteHalf>,
     ) -> anyhow::Result<()> {
         // TODO: get keys by pattern
         let pattern = &self.pattern;
@@ -32,7 +31,7 @@ impl Keys {
 
         let resp = RESP::Array(db.keys());
 
-        dst.lock().await.write_all(resp.encode().as_bytes()).await?;
+        dst.write_all(resp.encode().as_bytes()).await?;
 
         Ok(())
     }
