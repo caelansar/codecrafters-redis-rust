@@ -10,7 +10,7 @@ use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::select;
-use tokio::sync::{broadcast, Mutex};
+use tokio::sync::{broadcast, Mutex, MutexGuard};
 use tokio_stream::{Stream, StreamExt, StreamMap};
 
 /// Subscribes the client to one or more channels.
@@ -98,7 +98,8 @@ impl Subscribe {
             // to. When new `SUBSCRIBE` commands are received during the
             // execution of `apply`, the new channels are pushed onto this vec.
             for channel_name in self.channels.drain(..) {
-                subscribe_to_channel(channel_name, &mut subscriptions, db, dst.clone()).await?;
+                subscribe_to_channel(channel_name, &mut subscriptions, db, dst.lock().await)
+                    .await?;
             }
 
             // Wait for one of the following to happen:
@@ -141,7 +142,7 @@ async fn subscribe_to_channel(
     channel_name: String,
     subscriptions: &mut StreamMap<String, Messages>,
     db: &Db,
-    dst: Arc<Mutex<OwnedWriteHalf>>,
+    mut dst: MutexGuard<'_, OwnedWriteHalf>,
 ) -> anyhow::Result<()> {
     let mut rx = db.subscribe(channel_name.clone());
 
@@ -162,11 +163,7 @@ async fn subscribe_to_channel(
 
     // Respond with the successful subscription
     let resp = make_subscribe_frame(channel_name, subscriptions.len());
-    dst.lock()
-        .await
-        .write_all(resp.encode().as_bytes())
-        .await
-        .unwrap();
+    dst.write_all(resp.encode().as_bytes()).await.unwrap();
 
     Ok(())
 }

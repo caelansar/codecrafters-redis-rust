@@ -202,8 +202,8 @@ async fn handle_connection(
                     }
                 }
 
-                let resp = match db.set_stream(xadd.key(), id.clone(), xadd.data()) {
-                    Ok(_) => RESP::BulkString(Bytes::from(id.clone())),
+                let resp = match db.set_stream(xadd.key(), &id, xadd.data()) {
+                    Ok(_) => RESP::BulkString(Bytes::from(id)),
                     Err(e) => RESP::Error(e.to_string()),
                 };
 
