@@ -14,7 +14,7 @@ use std::ops::Sub;
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime};
 use tokio::fs::File;
 use tokio::io::{AsyncWriteExt, BufReader};
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
@@ -150,75 +150,7 @@ async fn handle_connection(
                     .unwrap();
             }
             Command::XRange(xrange) => xrange.apply(&db, writer.lock().await).await.unwrap(),
-            Command::Xadd(xadd) => {
-                let mut id = xadd.id().to_string();
-
-                match id.as_str() {
-                    "*" => {
-                        let now = SystemTime::now();
-                        let duration = now.duration_since(UNIX_EPOCH).unwrap();
-
-                        id = format!("{}-{}", duration.as_millis(), 0);
-                    }
-                    _ => {
-                        let parts = id.split_once('-');
-                        if let Some((time, seq)) = parts {
-                            if seq == "*" {
-                                match db.get_stream(xadd.key()) {
-                                    None => {
-                                        if time == "0" {
-                                            id = format!("{}-{}", time, 1);
-                                        } else {
-                                            id = format!("{}-{}", time, 0);
-                                        }
-                                    }
-                                    Some(stream) => {
-                                        let next_seq = stream
-                                            .iter()
-                                            .filter_map(|(s, _)| {
-                                                let (t, s) = s.split_once('-').unwrap();
-                                                if t == time {
-                                                    Some((t, s))
-                                                } else {
-                                                    None
-                                                }
-                                            })
-                                            .last()
-                                            .map(|(_, seq)| {
-                                                let seq: u64 = seq.parse().unwrap();
-                                                seq + 1
-                                            });
-                                        if next_seq.is_some() {
-                                            println!("next seq: {:?}", next_seq);
-
-                                            id = format!("{}-{}", time, next_seq.unwrap());
-                                        } else {
-                                            id = format!("{}-{}", time, 0);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                let resp = match db.set_stream(xadd.key(), &id, xadd.data()) {
-                    Ok(_) => RESP::BulkString(Bytes::from(id)),
-                    Err(e) => RESP::Error(e.to_string()),
-                };
-
-                let senders = db.get_all_block(xadd.key());
-                senders
-                    .into_iter()
-                    .for_each(|sender| sender.send(RESP::Array(xadd.to_item())).unwrap());
-
-                writer
-                    .lock()
-                    .await
-                    .write_all(resp.encode().as_bytes())
-                    .await
-                    .unwrap();
-            }
+            Command::Xadd(xadd) => xadd.apply(&db, writer.lock().await).await.unwrap(),
             Command::Type(typ) => typ.apply(&db, writer.lock().await).await.unwrap(),
             Command::Get(get) => {
                 // TODO: remove
