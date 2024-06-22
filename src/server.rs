@@ -58,6 +58,7 @@ async fn handle_connection(
             Command::Echo(echo) => echo.apply(writer.lock().await).await.unwrap(),
             Command::Keys(keys) => keys.apply(&db, writer.lock().await).await.unwrap(),
             Command::Ping(ping) => ping.apply(writer.lock().await).await.unwrap(),
+            Command::Incr(incr) => incr.apply(&db, writer.lock().await).await.unwrap(),
             Command::Subscribe(subscribe) => subscribe
                 .apply(&db, &mut conn, writer.clone())
                 .await

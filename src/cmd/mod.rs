@@ -1,5 +1,6 @@
 use self::echo::Echo;
 use self::get::Get;
+use self::incr::Incr;
 use self::keys::Keys;
 use self::ping::Ping;
 use self::publish::Publish;
@@ -15,6 +16,7 @@ use crate::protocol::RESP;
 
 mod echo;
 mod get;
+mod incr;
 mod keys;
 mod ping;
 mod publish;
@@ -41,6 +43,7 @@ pub enum Command {
     Publish(Publish),
     Subscribe(Subscribe),
     Unsubscribe(Unsubscribe),
+    Incr(Incr),
     Raw(RESP),
 }
 
@@ -63,6 +66,7 @@ impl Command {
             "publish" => Command::Publish(Publish::parse_frames(&mut parse)?),
             "subscribe" => Command::Subscribe(Subscribe::parse_frames(&mut parse)?),
             "unsubscribe" => Command::Unsubscribe(Unsubscribe::parse_frames(&mut parse)?),
+            "incr" => Command::Incr(Incr::parse_frames(&mut parse)?),
             _ => Command::Raw(resp),
         };
 
